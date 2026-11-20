@@ -88,11 +88,12 @@ Panel {
     readonly property color ink: bar ? bar.foreground : Color.foreground
 
     function when(timestamp) {
-        return new Date(timestamp * 1000).toLocaleString()
+        return new Date(timestamp * 1000).toLocaleString(Qt.locale(I18n.formatLocale))
     }
 
     function open() {
         page = "favourites"
+        errorMessage = ""
         controller.show()
         run(["visit"])
     }
@@ -131,7 +132,9 @@ Panel {
     Process {
         id: worker
         stdout: StdioCollector { id: output; waitForEnd: true }
+        stderr: StdioCollector { id: diagnostics; waitForEnd: true }
         onExited: function(code) {
+            if (diagnostics.text.trim()) console.warn(diagnostics.text.trim())
             try {
                 if (code !== 0) throw new Error("failed")
                 root.nowSeconds = Date.now() / 1000
@@ -207,7 +210,7 @@ Panel {
                 Copy {
                     Layout.fillWidth: true
                     text: root.errorMessage || (root.dataModel.attempt
-                        ? "Last refresh attempt " + new Date(root.dataModel.attempt * 1000).toLocaleTimeString()
+                        ? "Last refresh attempt " + new Date(root.dataModel.attempt * 1000).toLocaleTimeString(Qt.locale(I18n.formatLocale))
                         : "Awaiting first check")
                     font.pixelSize: Style.font.caption
                 }

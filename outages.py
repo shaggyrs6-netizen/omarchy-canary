@@ -1,16 +1,18 @@
 """Local incident cache and desktop notification helper."""
-from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
 import fcntl
 import json
+import http.client
 import os
 from pathlib import Path
+from queue import Empty, Queue
 import re
-import signal
 import subprocess
 import sys
 import tempfile
+from threading import Thread
 import time
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
@@ -156,26 +158,60 @@ def parse(source, data):
         rows.append(incident(key, title, state, severity))
     return rows
 
+CHECK_DEADLINE = 18
+PROBES = {
+    "connection-google": ("https://connectivitycheck.gstatic.com/generate_204", b""),
+    "connection-cloudflare": ("https://www.cloudflare.com/cdn-cgi/trace", b"fl="),
+}
+
+def diagnostic(key, reason):
+    print(f"Omarchy Canary: {key}: {reason}", file=sys.stderr, flush=True)
+
 def read_source(source):
-    try:
-        return parse(source, fetch(SOURCES[source][2]))
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError, ET.ParseError):
-        return None
+    return parse(source, fetch(SOURCES[source][2]))
+
+def probe(target):
+    url, marker = target
+    body = fetch(url)
+    return body.startswith(marker) if marker else body == b""
+
+def completed_checks(tasks, timeout):
+    """Yield finished network checks until the deadline.
+
+    This CLI runs one batch per process. A stuck network thread has no access
+    to the cache, locks or stderr, and cannot delay process exit.
+    """
+    results = Queue()
+
+    def check(key, function, argument):
+        try:
+            result = function(argument)
+        except urllib.error.HTTPError as error:
+            results.put((key, None, f"HTTP {error.code}"))
+        except (OSError, http.client.HTTPException, ValueError, KeyError, TypeError,
+                AttributeError, IndexError, ET.ParseError) as error:
+            results.put((key, None, type(error).__name__))
+        else:
+            results.put((key, result, None))
+
+    deadline = time.monotonic() + timeout
+    pending = set(tasks)
+    for key, (function, argument) in tasks.items():
+        Thread(target=check, args=(key, function, argument), daemon=True).start()
+
+    while pending:
+        try:
+            key, result, error = results.get(timeout=max(0, deadline - time.monotonic()))
+        except Empty:
+            break
+        pending.remove(key)
+        if error:
+            diagnostic(key, error)
+        yield key, result
 
 def connection():
-    def probe(target):
-        url, marker = target
-        try:
-            body = fetch(url)
-            return body.startswith(marker) if marker else body == b""
-        except (OSError, ValueError):
-            return False
-
-    targets = (("https://connectivitycheck.gstatic.com/generate_204", b""),
-               ("https://www.cloudflare.com/cdn-cgi/trace", b"fl="))
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        return any(list(pool.map(probe, targets)))
-
+    tasks = {key: (probe, target) for key, target in PROBES.items()}
+    return any(result is True for _, result in completed_checks(tasks, CHECK_DEADLINE))
 
 def merge(previous, incoming, now):
     if incoming is None:
@@ -212,21 +248,36 @@ def refresh(state, force):
     alerts = []
     sources = state.setdefault("sources", {})
     due = [key for key in SOURCES if force or now >= sources.get(key, {}).get("retry", 0)]
-    with ThreadPoolExecutor(max_workers=11) as pool:
-        probe_result = pool.submit(connection) if state.get("probe") else None
-        for key, result in zip(due, pool.map(read_source, due)):
-            entry, changes = merge(sources.get(key, {}), result, now)
-            if result is None:
-                entry["retry"] = now + min(1800, 300 * 2 ** min(entry["failures"] - 1, 3))
-            sources[key] = entry
-            if key in state.get("alerts", []) and changes:
-                alerts.append((SOURCES[key][0], changes))
-        if probe_result is not None:
-            state["connection"] = "reachable" if probe_result.result() else "unverified"
-    if state.get("connection") == "unverified" and any(sources.get(k, {}).get("checked") == now for k in due):
-        state["connection"] = "reachable"
-    if state.get("connection") == "unverified":
-        return []
+    tasks = {key: (read_source, key) for key in due}
+    pending_probes = set(PROBES) if state.get("probe") else set()
+    tasks.update({key: (probe, PROBES[key]) for key in pending_probes})
+    pending_feeds = set(due)
+    completed = {}
+    reachable = False
+    for key, result in completed_checks(tasks, CHECK_DEADLINE):
+        if key in PROBES:
+            pending_probes.discard(key)
+            reachable = reachable or result is True
+        else:
+            pending_feeds.remove(key)
+            completed[key] = result
+            reachable = reachable or result is not None
+        if not pending_feeds and (reachable or not pending_probes):
+            break
+    for key in due:
+        if key in pending_feeds:
+            diagnostic(key, "refresh deadline exceeded")
+        result = completed.get(key)
+        entry, changes = merge(sources.get(key, {}), result, now)
+        if result is None:
+            entry["retry"] = now + min(1800, 300 * 2 ** min(entry["failures"] - 1, 3))
+        sources[key] = entry
+        if key in state.get("alerts", []) and changes:
+            alerts.append((SOURCES[key][0], changes))
+    if state.get("probe"):
+        state["connection"] = "reachable" if reachable else "unverified"
+        if pending_probes and not reachable:
+            diagnostic("connection", "refresh deadline exceeded")
     return alerts
 
 def view(state):
@@ -283,9 +334,13 @@ def view(state):
                 attempt=state.get("attempt", 0))
 
 def save(state):
-    with tempfile.NamedTemporaryFile(mode="w", dir=STATE, delete=False) as file:
-        json.dump(state, file)
-    os.replace(file.name, STATE / "state.json")
+    file = tempfile.NamedTemporaryFile(mode="w", dir=STATE, delete=False)
+    try:
+        with file:
+            json.dump(state, file)
+        os.replace(file.name, STATE / "state.json")
+    finally:
+        Path(file.name).unlink(missing_ok=True)
 
 def send_notification(body):
     subprocess.run(["notify-send", "-a", "Omarchy Canary", "Omarchy Canary", body], timeout=4, check=False)
@@ -293,7 +348,17 @@ def send_notification(body):
 def main(args):
     STATE.mkdir(parents=True, mode=0o700, exist_ok=True)
     with (STATE / "lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        # Settings and polling can overlap across bar instances. Bound the wait.
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    diagnostic("state", "another command is still running")
+                    return 1
+                time.sleep(0.05)
         path = STATE / "state.json"
         state = json.loads(path.read_text()) if path.exists() else {}
         command = args[0]
@@ -339,5 +404,4 @@ def main(args):
         print(json.dumps(view(state)))
 
 if __name__ == "__main__":
-    signal.alarm(25)
-    main(sys.argv[1:])
+    sys.exit(main(sys.argv[1:]))

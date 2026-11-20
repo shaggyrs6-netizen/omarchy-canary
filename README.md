@@ -31,3 +31,11 @@ The bar colours are shown using Canary's dummy preview.
 ## Licence
 
 [MIT](LICENSE)
+
+
+## Running tests
+
+Run `python3 -B -m unittest discover -s tests`. Fixtures cover incident parsing,
+alert transitions, cached status, slow and failed feeds, and state writes without
+contacting public feeds. Failed public checks appear in the Omarchy shell log
+with the feed ID and error type. The log does not include response bodies.
