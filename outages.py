@@ -1,12 +1,16 @@
 """Local incident cache and desktop notification helper."""
+import contextlib
 import datetime as dt
 import fcntl
-import json
 import http.client
+import ipaddress
+import json
 import os
 from pathlib import Path
 from queue import Empty, Queue
 import re
+import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -14,6 +18,8 @@ from threading import Thread
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 import xml.etree.ElementTree as ET
 
 SOURCES = {
@@ -33,13 +39,8 @@ SOURCES = {
     "slack": ("Slack", "slack", "https://slack-status.com/api/v2.0.0/history", "https://slack-status.com/"),
     "azure": ("Azure public notices", "notices", "https://rssfeed.azure.status.microsoft/en-us/status/feed/", "https://azure.status.microsoft/en-us/status/"),
 }
-COUNTRIES = {
-    "US": "United States",
-    "GB": "United Kingdom",
-    "CA": "Canada",
-    "AU": "Australia",
-    "global": "Other / global",
-}
+COUNTRIES = {"global": "Other / global", **json.loads(
+    Path(__file__).with_name("countries.json").read_text(encoding="utf-8"))}
 # ID -> country, name, kind of check, provider page, provider alert help (optional).
 LINKS = {
     "xfinity": ("US", "Xfinity", "Home broadband · address lookup", "https://www.xfinity.com/support/statusmap", "https://www.xfinity.com/support/articles/proactive-outage-notifications"),
@@ -96,6 +97,66 @@ def fetch(url):
         raise ValueError("Feed exceeds size limit")
     return data
 
+def service_url(value):
+    value = value.strip()
+    try:
+        url = urlsplit(value)
+        if (len(value) > 2048 or re.search(r"[\s\\\x00-\x1f\x7f]", value)
+                or url.scheme not in ("http", "https") or not url.hostname
+                or url.username is not None or url.password is not None
+                or url.netloc.endswith(":") or (url.port is not None and not 0 < url.port <= 65535)):
+            raise ValueError
+        host = url.hostname.encode("idna").decode("ascii")
+        if ":" in host:
+            host = f"[{ipaddress.IPv6Address(host)}]"
+        elif not re.fullmatch(r"[a-z0-9.-]+", host):
+            raise ValueError
+        port = f":{url.port}" if url.port is not None else ""
+        return urlunsplit((url.scheme, host + port, url.path or "/", url.query, url.fragment))
+    except (ValueError, UnicodeError):
+        raise ValueError("Enter a valid web address starting with https:// or http://.") from None
+
+def statuspage_endpoint(url):
+    page = urlsplit(url)
+    if (page.scheme != "https" or page.port not in (None, 443) or page.query
+            or page.path.rstrip("/") not in ("", "/history", "/api", "/api/v2/status.json", "/api/v2/summary.json",
+                                             "/api/v2/incidents.json", "/api/v2/incidents/unresolved.json")):
+        return None
+    return urlunsplit(("https", page.netloc, "/api/v2/incidents.json", "", ""))
+
+def fetch_custom_feed(url):
+    """Use public HTTPS only, with no proxies, redirects or second DNS lookup."""
+    endpoint = urlsplit(url)
+    if statuspage_endpoint(url) != url:
+        raise ValueError("Unsupported feed address")
+    addresses = socket.getaddrinfo(endpoint.hostname, 443, type=socket.SOCK_STREAM)
+    for _, _, _, _, sockaddr in addresses:
+        address = ipaddress.ip_address(sockaddr[0])
+        if (not address.is_global or address.is_multicast
+                or (address.version == 6 and address not in ipaddress.ip_network("2000::/3"))):
+            raise ValueError("Feed resolved to a non-public address")
+    context = ssl.create_default_context()
+    with contextlib.closing(http.client.HTTPSConnection(endpoint.hostname, context=context, timeout=4)) as conn:
+        for family, socktype, protocol, _, sockaddr in addresses:
+            with socket.socket(family, socktype, protocol) as transport:
+                transport.settimeout(4)
+                try:
+                    transport.connect(sockaddr)
+                except OSError:
+                    continue
+                conn.sock = context.wrap_socket(transport, server_hostname=endpoint.hostname)
+                break
+        if conn.sock is None:
+            raise OSError("Could not connect to public feed")
+        conn.request("GET", endpoint.path, headers={"User-Agent": "Omarchy-Canary", "Accept": "application/json"})
+        with conn.getresponse() as response:
+            if response.status != 200:
+                raise ValueError(f"Feed returned HTTP {response.status}")
+            body = response.read(LIMIT + 1)
+    if len(body) > LIMIT:
+        raise ValueError("Feed exceeds size limit")
+    return body
+
 def clean(value, limit=180):
     # Labels and notifications can safely be passed to controls that support markup.
     return " ".join(str(value or "").replace("<", "‹").replace(">", "›").replace("&", "＆").split())[:limit]
@@ -106,15 +167,26 @@ def incident(key, title, state, severity=0, scope=()):
     return {"id": str(key)[:240], "title": clean(title), "state": state, "severity": severity,
             "scope": sorted({clean(x, 90) for x in scope if x})[:30]}
 
-def parse(source, data):
-    kind = SOURCES[source][1]
-    if kind == "summary":
+def parse(source, data, kind=None):
+    kind = kind or SOURCES[source][1]
+    if kind in ("summary", "custom-statuspage"):
         doc = json.loads(data)
+        rows = doc["incidents"]
+        if kind == "custom-statuspage":
+            if not isinstance(doc["page"]["id"], str) or not doc["page"]["id"] or not isinstance(rows, list):
+                raise ValueError("Missing Statuspage metadata")
+            phases = {"investigating", "identified", "monitoring", "resolved", "postmortem"}
+            maintenance = {"scheduled", "in_progress", "verifying", "completed"}
+            for row in rows:
+                if (row["status"] not in phases | maintenance
+                        or not isinstance(row["id"], str) or not isinstance(row["name"], str)):
+                    raise ValueError("Unsupported Statuspage incident")
+            rows = [row for row in rows if row["status"] in phases and row["impact"] != "maintenance"]
         return [incident(row["id"], row["name"],
                          "resolved" if row["status"] in ("resolved", "postmortem") else "active",
                          {"minor": 1, "major": 2, "critical": 3}.get(row["impact"], 0),
                          [c["name"] for c in row.get("components", [])])
-                for row in doc["incidents"][:250]]
+                for row in rows[:250]]
     if kind == "slack":
         return [incident(row["id"], row["title"],
                          "resolved" if row["status"] == "resolved" else "active",
@@ -169,6 +241,15 @@ def diagnostic(key, reason):
 
 def read_source(source):
     return parse(source, fetch(SOURCES[source][2]))
+
+def read_custom_feed(url):
+    return parse(None, fetch_custom_feed(url), "custom-statuspage")
+
+def source_catalog(state):
+    return {**SOURCES, **{
+        key: (entry["name"], "custom-statuspage", entry["feed"], entry["url"])
+        for key, entry in state.get("custom", {}).items() if entry.get("feed")
+    }}
 
 def probe(target):
     url, marker = target
@@ -247,8 +328,12 @@ def refresh(state, force):
     state["attempt"] = now
     alerts = []
     sources = state.setdefault("sources", {})
-    due = [key for key in SOURCES if force or now >= sources.get(key, {}).get("retry", 0)]
-    tasks = {key: (read_source, key) for key in due}
+    catalog = source_catalog(state)
+    selected = favourite_ids(state) | set(state.get("alerts", []))
+    due = [key for key in catalog if (key in SOURCES or key in selected)
+           and (force or now >= sources.get(key, {}).get("retry", 0))]
+    tasks = {key: (read_source, key) if key in SOURCES else (read_custom_feed, catalog[key][2])
+             for key in due}
     pending_probes = set(PROBES) if state.get("probe") else set()
     tasks.update({key: (probe, PROBES[key]) for key in pending_probes})
     pending_feeds = set(due)
@@ -273,21 +358,44 @@ def refresh(state, force):
             entry["retry"] = now + min(1800, 300 * 2 ** min(entry["failures"] - 1, 3))
         sources[key] = entry
         if key in state.get("alerts", []) and changes:
-            alerts.append((SOURCES[key][0], changes))
+            alerts.append((catalog[key][0], changes))
     if state.get("probe"):
         state["connection"] = "reachable" if reachable else "unverified"
         if pending_probes and not reachable:
             diagnostic("connection", "refresh deadline exceeded")
     return alerts
 
+def favourite_ids(state):
+    country = state.get("country", "US")
+    defaults = [key for key in DEFAULT_FAVOURITES if key not in LINKS or LINKS[key][0] in ("global", country)]
+    return set(state.get("favourites", defaults))
+
+def add_custom(state, key, name, url, endpoint, events):
+    favourites = favourite_ids(state)
+    if key is None and events is None:
+        key = next((key for key, row in LINKS.items() if url == service_url(row[3])), None)
+    if key is None:
+        custom = state.setdefault("custom", {})
+        key = next((key for key, entry in custom.items()
+                    if entry["url"] == url or (endpoint and entry.get("feed") == endpoint)), None)
+        key = key or "custom-" + uuid4().hex
+        entry = custom.setdefault(key, {})
+        entry.update(name=name, url=url)
+        if events is not None and not entry.get("feed"):
+            entry["feed"] = endpoint
+            cache = state.setdefault("sources", {})
+            cache[key], _ = merge(cache.get(key, {}), events, time.time())
+    favourites.add(key)
+    state["favourites"] = sorted(favourites)
+    return key
+
 def view(state):
     now = time.time()
     rows = []
     country = state.get("country", "US")
-    defaults = tuple(key for key in DEFAULT_FAVOURITES
-                     if key not in LINKS or LINKS[key][0] in ("global", country))
-    favourites = state.get("favourites", defaults)
-    for key, (name, kind, _, url) in SOURCES.items():
+    favourites = favourite_ids(state)
+    custom = state.get("custom", {})
+    for key, (name, kind, _, url) in source_catalog(state).items():
         data = state.get("sources", {}).get(key, {})
         events = data.get("events", [])
         active = [e for e in events if e["state"] == "active"]
@@ -318,7 +426,7 @@ def view(state):
                          active=bool(fresh_active), cachedActive=bool(active), missingActive=bool(stale_active), alert=key in state.get("alerts", []),
                          healthKnown=bool(checked and not data.get("failures") and (not stale_active or fresh_active)
                                           and kind != "notices"),
-                         kind="feed", favourite=key in favourites, inDirectory=True,
+                         kind="feed", custom=key in custom, favourite=key in favourites, inDirectory=True,
                          details=[dict(title=e["title"] + (" · " + ", ".join(e["scope"]) if e["scope"] else ""),
                                        confirmed=e.get("confirmed", checked), active=e["state"] == "active")
                                   for e in details[:4]]))
@@ -326,8 +434,13 @@ def view(state):
         rows.append(dict(id=key, name=name, url=url, kind="link", status=label,
                          favourite=key in favourites, details=[], inDirectory=region in ("global", country),
                          alertHelp=alert_help[0] if alert_help else ""))
+    for key, entry in custom.items():
+        if not entry.get("feed"):
+            rows.append(dict(id=key, name=entry["name"], url=entry["url"], kind="link", custom=True,
+                             status="Outage checker", favourite=key in favourites, details=[], inDirectory=True))
     rows.sort(key=lambda row: (not row["favourite"], row["name"].casefold()))
     return dict(rows=rows, background=state.get("background", False), country=country, countries=COUNTRIES,
+                providerCountries=sorted({row[0] for row in LINKS.values()} - {"global"}),
                 showAll=state.get("showAll", False),
                 probe=state.get("probe", False), connection=state.get("connection", "unchecked"),
                 quiet=state.get("quiet", False), snooze=state.get("snooze", 0) > now,
@@ -343,9 +456,40 @@ def save(state):
         Path(file.name).unlink(missing_ok=True)
 
 def send_notification(body):
-    subprocess.run(["notify-send", "-a", "Omarchy Canary", "Omarchy Canary", body], timeout=4, check=False)
+    icon = Path(__file__).resolve().with_name("notification-icon.png")
+    result = subprocess.run(
+        ["notify-send", "-a", "Omarchy Canary", "-h", f"string:image-path:{icon}",
+         "--", "Omarchy Canary", body], timeout=4, check=False,
+    )
+    return result.returncode == 0
 
 def main(args):
+    command = args[0]
+    if command == "test-alert":
+        try:
+            sent = send_notification("Test alert · Example service · new incident")
+        except (OSError, subprocess.TimeoutExpired):
+            sent = False
+        print(json.dumps({"testAlertSent": sent}))
+        return
+    if command == "add-custom":
+        try:
+            name = clean(args[1], 80)
+            if not name:
+                raise ValueError("Enter a service name.")
+            url = service_url(args[2])
+        except ValueError as error:
+            print(json.dumps({"inputError": str(error)}))
+            return
+        endpoint = statuspage_endpoint(url)
+        builtin = next((key for key, (_, kind, feed, page) in SOURCES.items()
+                        if url in (service_url(feed), service_url(page))
+                        or (kind == "summary" and endpoint == feed)), None)
+        events = None
+        if endpoint and builtin is None:
+            events = next((result for _, result in completed_checks(
+                {"custom feed": (read_custom_feed, endpoint)}, 7)), None)
+
     STATE.mkdir(parents=True, mode=0o700, exist_ok=True)
     with (STATE / "lock").open("a") as lock:
         # Settings and polling can overlap across bar instances. Bound the wait.
@@ -361,8 +505,8 @@ def main(args):
                 time.sleep(0.05)
         path = STATE / "state.json"
         state = json.loads(path.read_text()) if path.exists() else {}
-        command = args[0]
         alerts = []
+        added = None
         if command in ("refresh", "visit", "poll"):
             if command != "poll" or state.get("background"):
                 alerts = refresh(state, command == "refresh")
@@ -372,7 +516,16 @@ def main(args):
                 alerts = refresh(state, False)
             if command == "probe":
                 state["connection"] = ("reachable" if connection() else "unverified") if state[command] else "unchecked"
-        elif command == "alert" and args[1] in SOURCES:
+        elif command == "add-custom":
+            added = add_custom(state, builtin, name, url, endpoint, events)
+        elif command == "remove-custom":
+            key = args[1]
+            if key in state.get("custom", {}):
+                state["favourites"] = sorted(favourite_ids(state) - {key})
+                state["alerts"] = [choice for choice in state.get("alerts", []) if choice != key]
+                state.get("sources", {}).pop(key, None)
+                del state["custom"][key]
+        elif command == "alert" and args[1] in source_catalog(state):
             choices = set(state.get("alerts", []))
             if args[1] in choices:
                 choices.remove(args[1])
@@ -381,8 +534,8 @@ def main(args):
             state["alerts"] = sorted(choices)
         elif command == "country" and args[1] in COUNTRIES:
             state["country"] = args[1]
-        elif command == "favourite" and (args[1] in SOURCES or args[1] in LINKS):
-            choices = {row["id"] for row in view(state)["rows"] if row["favourite"]}
+        elif command == "favourite" and (args[1] in SOURCES or args[1] in LINKS or args[1] in state.get("custom", {})):
+            choices = favourite_ids(state)
             choices.symmetric_difference_update([args[1]])
             state["favourites"] = sorted(choices)
         elif command == "snooze":
@@ -401,7 +554,10 @@ def main(args):
                 send_notification(body)
             except (OSError, subprocess.TimeoutExpired):
                 pass
-        print(json.dumps(view(state)))
+        result = view(state)
+        if added:
+            result["added"] = added
+        print(json.dumps(result))
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
@@ -143,6 +144,116 @@ outages.main(["refresh"])
                     outages.save({"unserialisable": object()})
             self.assertEqual(json.loads(saved.read_bytes()), {"country": "US"})
             self.assertEqual(list(state_dir.iterdir()), [saved])
+
+    def test_custom_link_and_country_persist_and_feed_can_be_enabled(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(outages, "STATE", Path(folder)):
+            def run(*args):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertIsNone(outages.main(args))
+                return json.loads(output.getvalue())
+
+            self.assertEqual(run("country", "DE")["country"], "DE")
+            self.assertIn("inputError", run("add-custom", "Invalid", "file:///etc/passwd"))
+            with patch.object(outages, "read_custom_feed", side_effect=ValueError):
+                result = run("add-custom", "My provider", "https://status.example.org/")
+            key = result["added"]
+            row = next(row for row in result["rows"] if row["id"] == key)
+            self.assertEqual(row["kind"], "link")
+            self.assertTrue(row["favourite"])
+            self.assertNotIn("alert", row)
+            self.assertFalse(next(row for row in result["rows"] if row["id"] == "xfinity")["inDirectory"])
+
+            baseline = outages.incident("old", "Existing incident", "active")
+            with patch.object(outages, "read_custom_feed", return_value=[baseline]), \
+                    patch.object(outages, "send_notification") as notify:
+                result = run("add-custom", "My provider", "https://status.example.org/")
+                self.assertEqual(result["added"], key)
+                row = next(row for row in result["rows"] if row["id"] == key)
+                self.assertEqual(row["kind"], "feed")
+                self.assertFalse(row["alert"])
+                self.assertTrue(row["active"])
+                run("alert", key)
+                notify.assert_not_called()
+
+            with patch.multiple(outages, SOURCES={}, read_custom_feed=lambda _: [dict(baseline, state="resolved")]), \
+                    patch.object(outages, "send_notification") as notify:
+                run("refresh")
+                notify.assert_called_once_with("My provider · resolved")
+            run("country", "GB")
+            self.assertTrue(next(row for row in run("status")["rows"] if row["id"] == key)["favourite"])
+
+    def test_remove_custom_link_and_feed_preserves_other_services(self):
+        incident = outages.incident("old", "Existing incident", "active")
+        checker = {"name": "Local outage checker", "url": "https://example.org/outages"}
+        feed = {"name": "Custom feed", "url": "https://example.org/",
+                "feed": "https://example.org/api/v2/incidents.json"}
+        state = {
+            "country": "GB", "background": True,
+            "custom": {"custom-link": checker, "custom-feed": feed},
+            "favourites": ["custom-link", "custom-feed", "github"],
+            "alerts": ["custom-feed", "github"],
+            "sources": {"custom-feed": {"events": [incident]}, "github": {}},
+        }
+        with tempfile.TemporaryDirectory() as folder, patch.object(outages, "STATE", Path(folder)):
+            outages.save(state)
+            for key in ("github", "custom-link", "custom-feed", "custom-feed"):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    outages.main(["remove-custom", key])
+                rows = json.loads(output.getvalue())["rows"]
+                self.assertTrue(any(row["id"] == "github" and row["favourite"] and row["alert"] for row in rows))
+                if key != "github":
+                    self.assertFalse(any(row["id"] == key for row in rows))
+
+            saved = json.loads((Path(folder) / "state.json").read_bytes())
+            self.assertEqual(saved, {
+                "country": "GB", "background": True, "custom": {},
+                "favourites": ["github"], "alerts": ["github"], "sources": {"github": {}},
+            })
+
+    def test_custom_feed_requires_statuspage_metadata_and_ignores_maintenance(self):
+        with self.assertRaises(KeyError):
+            outages.parse(None, b'{"incidents":[]}', "custom-statuspage")
+        data = json.dumps({"page": {"id": "public"}, "incidents": [
+            {"id": "a", "name": "Maintenance", "status": "in_progress", "impact": "maintenance"},
+            {"id": "b", "name": "<b>Failure</b>", "status": "identified", "impact": "major"},
+        ]}).encode()
+        self.assertEqual(outages.parse(None, data, "custom-statuspage"), [
+            outages.incident("b", "‹b›Failure‹/b›", "active", 2),
+        ])
+
+    def test_custom_feed_does_not_connect_to_private_or_mixed_dns_answers(self):
+        for addr in ("127.0.0.1", "10.0.0.1", "::ffff:127.0.0.1", "ff02::1"):
+            with self.subTest(addr=addr), patch.object(outages.socket, "getaddrinfo", return_value=[
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 443)),
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", (addr, 443)),
+            ]), patch.object(outages.socket, "socket") as connect:
+                with self.assertRaises(ValueError):
+                    outages.fetch_custom_feed("https://status.example.org/api/v2/incidents.json")
+                connect.assert_not_called()
+
+    def test_manual_test_alert_reports_result_and_preserves_settings(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(outages, "STATE", Path(folder)):
+            saved = Path(folder) / "state.json"
+            original = '{"alerts":[],"quiet":true,"snooze":9999999999}'
+            saved.write_text(original)
+            for returncode, sent in ((0, True), (1, False)):
+                output = io.StringIO()
+                result = subprocess.CompletedProcess(["notify-send"], returncode)
+                with patch.object(outages.subprocess, "run", return_value=result) as notify, \
+                        contextlib.redirect_stdout(output):
+                    outages.main(["test-alert"])
+                self.assertEqual(json.loads(output.getvalue()), {"testAlertSent": sent})
+                icon = Path(outages.__file__).resolve().with_name("notification-icon.png")
+                self.assertTrue(icon.is_file())
+                notify.assert_called_once_with(
+                    ["notify-send", "-a", "Omarchy Canary", "-h", f"string:image-path:{icon}",
+                     "--", "Omarchy Canary",
+                     "Test alert · Example service · new incident"], timeout=4, check=False,
+                )
+            self.assertEqual(saved.read_text(), original)
+            self.assertEqual(list(Path(folder).iterdir()), [saved])
 
 
 if __name__ == "__main__":

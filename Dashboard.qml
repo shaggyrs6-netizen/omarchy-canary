@@ -15,16 +15,42 @@ Panel {
     property var dataModel: ({rows: [], connection: "unchecked"})
     property string page: "favourites"
     property string query: ""
+    property string countryQuery: ""
+    property bool browseCountries: false
+    property string addedServiceId: ""
+    property string removingServiceId: ""
+    property string removalReturnPage: "favourites"
     readonly property bool settings: page === "settings"
     readonly property bool directory: page === "directory"
+    readonly property bool pickingCountry: page === "country"
+    readonly property bool addingCustom: page === "custom"
+    readonly property bool confirmingRemoval: page === "remove"
+    readonly property var addedService: dataModel.rows.find(row => row.id === addedServiceId)
+    readonly property var removingService: dataModel.rows.find(row => row.id === removingServiceId)
+    readonly property string countryLabel: (dataModel.countries || {})[dataModel.country] || "United States"
+    readonly property bool searchingCountries: countryQuery.trim().length > 0
+    readonly property bool showCountryResults: pickingCountry && (searchingCountries || browseCountries)
+    readonly property var matchingCountries: {
+        if (!showCountryResults) return []
+        const countries = dataModel.countries || {}
+        const term = searchText(countryQuery.trim())
+        const aliases = {GB: ["uk", "great britain"], US: ["usa", "america"], TR: ["turkey"]}
+        const codes = Object.keys(countries)
+        const exact = codes.find(code => code.toLowerCase() === term || (aliases[code] || []).includes(term))
+        if (exact) return [exact]
+        return codes.filter(code => (code !== "global" || searchingCountries)
+            && searchText(countries[code]).includes(term))
+            .sort((a, b) => countries[a].localeCompare(countries[b]))
+    }
     readonly property var visibleServices: {
-        if (settings) return []
+        if (settings || pickingCountry || addingCustom || confirmingRemoval) return []
         if (!directory) return dataModel.rows.filter(row => row.favourite || (dataModel.showAll && row.inDirectory))
         const term = query.trim().toLowerCase()
         return dataModel.rows.filter(row => row.inDirectory
             && (row.name + " " + row.status).toLowerCase().includes(term))
     }
     property string errorMessage: ""
+    property bool testAlertSent: false
     property real nowSeconds: Date.now() / 1000
     property int previewStep: 0
     readonly property var indicator: {
@@ -94,10 +120,28 @@ Panel {
     function open() {
         page = "favourites"
         errorMessage = ""
+        testAlertSent = false
         controller.show()
         run(["visit"])
     }
     function close() { controller.hide() }
+    function searchText(value) {
+        return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    }
+    function goBack() {
+        if (confirmingRemoval) {
+            page = removalReturnPage
+            removingServiceId = ""
+        } else if (pickingCountry || addingCustom) {
+            page = "directory"
+        } else if (page !== "favourites") {
+            page = "favourites"
+        } else {
+            query = ""
+            page = "directory"
+        }
+        errorMessage = ""
+    }
     function run(args) {
         if (worker.running) return
         errorMessage = ""
@@ -129,6 +173,33 @@ Panel {
             border.color: Qt.alpha(root.ink, action.activeFocus ? .7 : .18)
         }
     }
+    component Field: Controls.TextField {
+        id: field
+        Layout.fillWidth: true
+        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+        font.pixelSize: Style.font.body
+        color: root.ink
+        placeholderTextColor: Qt.alpha(root.ink, 0.65)
+        background: Rectangle {
+            radius: Style.space(5)
+            color: Qt.alpha(root.ink, 0.06)
+            border.color: Qt.alpha(root.ink, field.activeFocus ? 0.7 : 0.18)
+        }
+    }
+    component CountryChoice: Action {
+        id: choice
+        required property string code
+        readonly property bool selected: root.dataModel.country === code
+        text: root.dataModel.countries?.[code] || ""
+        Accessible.name: text + (selected ? ", selected" : "")
+        enabled: !worker.running
+        contentItem: Copy {
+            text: choice.text + (choice.selected ? "  ✓" : "")
+            font.bold: choice.selected
+            verticalAlignment: Text.AlignVCenter
+        }
+        onClicked: root.run(["country", code])
+    }
     Process {
         id: worker
         stdout: StdioCollector { id: output; waitForEnd: true }
@@ -137,12 +208,32 @@ Panel {
             if (diagnostics.text.trim()) console.warn(diagnostics.text.trim())
             try {
                 if (code !== 0) throw new Error("failed")
+                const result = JSON.parse(output.text)
+                if (worker.command[2] === "test-alert") {
+                    if (!result.testAlertSent) throw new Error("notification failed")
+                    root.testAlertSent = true
+                    return
+                }
+                if (result.inputError) {
+                    root.errorMessage = result.inputError
+                    return
+                }
                 root.nowSeconds = Date.now() / 1000
-                root.dataModel = JSON.parse(output.text)
+                root.dataModel = result
+                if (worker.command[2] === "country" && root.pickingCountry)
+                    root.page = "directory"
+                if (result.added && root.addingCustom)
+                    root.addedServiceId = result.added
+                if (worker.command[2] === "remove-custom" && root.confirmingRemoval)
+                    root.goBack()
                 if (root.opened && !root.dataModel.attempt && worker.command[2] === "poll")
                     Qt.callLater(() => root.run(["visit"]))
             } catch (_) {
-                root.errorMessage = "Could not complete the check. Try Check now."
+                root.errorMessage = worker.command[2] === "add-custom" ? "Could not save the service. Try again."
+                    : worker.command[2] === "remove-custom" ? "Could not remove the service. Try again."
+                    : worker.command[2] === "country" ? "Could not save the country. Try again."
+                    : worker.command[2] === "test-alert" ? "Could not send the test alert. Try again."
+                    : "Could not complete the check. Try Check now."
             }
         }
     }
@@ -193,29 +284,109 @@ Panel {
                         font.pixelSize: Style.font.subtitle
                         font.bold: true
                     }
-                    Action { text: worker.running ? "Checking…" : "Check now"; enabled: !worker.running; onClicked: root.run(["refresh"]) }
+                    Action {
+                        visible: !root.addingCustom && !root.pickingCountry && !root.confirmingRemoval
+                        text: worker.running ? "Checking…" : "Check now"
+                        enabled: !worker.running
+                        onClicked: root.run(["refresh"])
+                    }
                     Action {
                         text: root.page === "favourites" ? "Add a service" : "Back"
-                        onClicked: {
-                            root.query = ""
-                            root.page = root.page === "favourites" ? "directory" : "favourites"
-                        }
+                        enabled: !worker.running || !["add-custom", "remove-custom"].includes(worker.command[2])
+                        onClicked: root.goBack()
                     }
                     Action {
                         visible: root.page === "favourites"
                         text: "Settings"
-                        onClicked: root.page = "settings"
+                        onClicked: {
+                            root.testAlertSent = false
+                            root.page = "settings"
+                        }
                     }
                 }
                 Copy {
                     Layout.fillWidth: true
+                        visible: !!root.errorMessage || (!root.addingCustom && !root.pickingCountry && !root.confirmingRemoval)
                     text: root.errorMessage || (root.dataModel.attempt
                         ? "Last refresh attempt " + new Date(root.dataModel.attempt * 1000).toLocaleTimeString(Qt.locale(I18n.formatLocale))
                         : "Awaiting first check")
                     font.pixelSize: Style.font.caption
                 }
 
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: root.pickingCountry
+                    spacing: Style.space(8)
+
+                    Copy { text: "Choose provider country"; font.bold: true }
+                    Field {
+                        id: countrySearch
+                        placeholderText: "Search by country name or code"
+                        Accessible.name: "Search countries"
+                        text: root.countryQuery
+                        onTextEdited: {
+                            root.countryQuery = text
+                            countryResults.positionViewAtBeginning()
+                        }
+                        onAccepted: {
+                            if (!worker.running && root.matchingCountries.length === 1)
+                                root.run(["country", root.matchingCountries[0]])
+                        }
+                    }
+                    Copy {
+                        Layout.fillWidth: true
+                        visible: !root.searchingCountries && !root.browseCountries
+                        text: "Countries with provider suggestions"
+                        font.pixelSize: Style.font.caption
+                    }
+                    GridLayout {
+                        Layout.fillWidth: true
+                        visible: !root.searchingCountries && !root.browseCountries
+                        columns: 2
+                        Repeater {
+                            model: root.pickingCountry ? root.dataModel.providerCountries || [] : []
+                            delegate: CountryChoice {
+                                required property string modelData
+                                code: modelData
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 1
+                            }
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        visible: !root.searchingCountries
+                        Action {
+                            text: root.browseCountries ? "Quick choices" : "Browse all countries"
+                            onClicked: root.browseCountries = !root.browseCountries
+                        }
+                        CountryChoice { code: "global" }
+                    }
+                    Copy {
+                        visible: root.showCountryResults && !root.matchingCountries.length
+                        text: "No matching countries"
+                    }
+                    ListView {
+                        id: countryResults
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        visible: root.showCountryResults && count > 0
+                        clip: true
+                        model: root.matchingCountries
+                        boundsBehavior: Flickable.StopAtBounds
+                        Controls.ScrollBar.vertical: Controls.ScrollBar { id: countryScrollbar }
+                        delegate: CountryChoice {
+                            required property string modelData
+                            code: modelData
+                            width: countryResults.width - countryScrollbar.width
+                        }
+                    }
+                    Item { Layout.fillHeight: true; visible: !countryResults.visible }
+                }
+
                 Controls.ScrollView {
+                    visible: !root.pickingCountry
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     contentWidth: availableWidth
@@ -254,6 +425,15 @@ Panel {
                                 onClicked: root.run(["snooze", String(!root.dataModel.snooze)])
                             }
                             Action {
+                                text: worker.running && worker.command[2] === "test-alert" ? "Sending…" : "Send test alert"
+                                enabled: !worker.running
+                                onClicked: {
+                                    root.testAlertSent = false
+                                    root.run(["test-alert"])
+                                }
+                            }
+                            Copy { visible: root.testAlertSent; text: "Test alert sent." }
+                            Action {
                                 text: previewTimer.running ? "End colour preview" : "Preview bar colours"
                                 onClicked: {
                                     if (previewTimer.running) previewTimer.stop()
@@ -272,48 +452,137 @@ Panel {
                         ColumnLayout {
                             Layout.fillWidth: true
                             visible: root.directory
-                            Copy { text: "Provider country"; font.bold: true }
-                            Flow {
+                            RowLayout {
                                 Layout.fillWidth: true
-                                spacing: Style.space(5)
-                                Repeater {
-                                    model: root.directory && root.dataModel.countries ? Object.keys(root.dataModel.countries) : []
-                                    delegate: Action {
-                                        id: countryButton
-                                        required property string modelData
-                                        readonly property bool selected: root.dataModel.country === modelData
-                                        text: (selected ? "✓ " : "") + root.dataModel.countries[modelData]
-                                        enabled: !worker.running
-                                        onClicked: root.run(["country", modelData])
+                                Action {
+                                    text: root.countryLabel + " ▾"
+                                    Accessible.name: "Choose provider country. Current country " + root.countryLabel
+                                    enabled: !!root.dataModel.countries
+                                    onClicked: {
+                                        root.countryQuery = ""
+                                        root.browseCountries = false
+                                        root.page = "country"
+                                        countrySearch.forceActiveFocus()
+                                    }
+                                }
+                                Item { Layout.fillWidth: true }
+                                Action {
+                                    text: "Add my own service"
+                                    onClicked: {
+                                        serviceName.clear()
+                                        serviceUrl.clear()
+                                        root.addedServiceId = ""
+                                        root.errorMessage = ""
+                                        root.page = "custom"
+                                        serviceName.forceActiveFocus()
                                     }
                                 }
                             }
-                            Controls.TextField {
+                            Field {
                                 id: serviceSearch
-                                Layout.fillWidth: true
                                 placeholderText: "Search services"
                                 Accessible.name: "Search services"
                                 text: root.query
                                 onTextEdited: root.query = text
-                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                font.pixelSize: Style.font.body
-                                color: root.ink
-                                placeholderTextColor: Qt.alpha(root.ink, 0.65)
-                                background: Rectangle {
-                                    radius: Style.space(5)
-                                    color: Qt.alpha(root.ink, 0.06)
-                                    border.color: Qt.alpha(root.ink, serviceSearch.activeFocus ? 0.7 : 0.18)
+                            }
+                            Copy {
+                                Layout.fillWidth: true
+                                text: {
+                                    const codes = root.dataModel.providerCountries
+                                    return codes && !codes.includes(root.dataModel.country)
+                                        ? "Global services are available here. Add your own local provider."
+                                        : "Star a service to show it on the main panel."
                                 }
                             }
-                            Copy { Layout.fillWidth: true; text: "Star a service to show it on the main panel." }
                         }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            visible: root.addingCustom
+                            Copy { text: "Add my own service"; font.bold: true }
+                            Copy {
+                                Layout.fillWidth: true
+                                visible: !root.addedService
+                                text: "Paste the provider’s public status page or outage checker."
+                            }
+                            Field {
+                                id: serviceName
+                                visible: !root.addedService
+                                enabled: !worker.running
+                                maximumLength: 80
+                                placeholderText: "Service name"
+                                Accessible.name: "Service name"
+                                onAccepted: serviceUrl.forceActiveFocus()
+                            }
+                            Field {
+                                id: serviceUrl
+                                visible: !root.addedService
+                                enabled: !worker.running
+                                maximumLength: 2048
+                                placeholderText: "https://"
+                                Accessible.name: "Public status or outage checker address"
+                                onAccepted: { if (saveService.enabled) saveService.clicked() }
+                            }
+                            Action {
+                                id: saveService
+                                visible: !root.addedService
+                                enabled: !worker.running && !!serviceName.text.trim() && !!serviceUrl.text.trim()
+                                text: worker.running && worker.command[2] === "add-custom" ? "Checking for a feed…" : "Save to favourites"
+                                onClicked: root.run(["add-custom", serviceName.text, serviceUrl.text])
+                            }
+                            Copy {
+                                Layout.fillWidth: true
+                                visible: !!root.addedService
+                                text: !root.addedService ? "" : root.addedService.name
+                                    + (root.addedService.kind === "feed" ? " saved. Alerts available."
+                                        : " saved. Open the outage checker from Favourites.")
+                            }
+                            RowLayout {
+                                visible: !!root.addedService
+                                Action {
+                                    visible: root.addedService?.kind === "feed"
+                                    enabled: !worker.running
+                                    text: root.addedService?.alert ? "Disable alerts" : "Enable alerts"
+                                    onClicked: root.run(["alert", root.addedService.id])
+                                }
+                                Action {
+                                    text: "Done"
+                                    onClicked: {
+                                        root.errorMessage = ""
+                                        root.page = "favourites"
+                                    }
+                                }
+                            }
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            visible: root.confirmingRemoval
+                            Copy {
+                                Layout.fillWidth: true
+                                text: "Remove %1?".arg(root.removingService?.name || "custom service")
+                                font.bold: true
+                            }
+                            Copy {
+                                Layout.fillWidth: true
+                                visible: root.removingService?.kind === "feed"
+                                text: "This also clears Canary alerts and saved incident history for this service."
+                            }
+                            RowLayout {
+                                Action { text: "Cancel"; enabled: !worker.running; onClicked: root.goBack() }
+                                Action {
+                                    text: "Remove service"
+                                    enabled: !worker.running && !!root.removingService?.custom
+                                    onClicked: root.run(["remove-custom", root.removingServiceId])
+                                }
+                            }
+                        }
+
                         Copy {
                             visible: root.page === "favourites"
                             text: root.dataModel.showAll ? "Services · favourites first" : "Favourites"
                             font.bold: true
                         }
                         Copy {
-                            visible: !root.settings && !root.visibleServices.length
+                            visible: (root.directory || root.page === "favourites") && !root.visibleServices.length
                             text: root.directory ? "No matching services" : "Use Add a service to choose favourites."
                         }
                         Repeater {
@@ -354,7 +623,8 @@ Panel {
                                     }
                                     Action {
                                         visible: card.modelData.kind === "feed"
-                                        text: card.modelData.alert ? "Alerts on" : "Alerts off"
+                                        text: card.modelData.alert ? "Disable alerts" : "Enable alerts"
+                                        Accessible.name: text + " for " + card.modelData.name
                                         enabled: !worker.running
                                         onClicked: root.run(["alert", card.modelData.id])
                                     }
@@ -366,6 +636,18 @@ Panel {
                                     Action {
                                         text: card.modelData.kind === "feed" ? "Open" : "Check"
                                         onClicked: Qt.openUrlExternally(card.modelData.url)
+                                    }
+                                    Action {
+                                        visible: !!card.modelData.custom
+                                        text: "Remove"
+                                        Accessible.name: "Remove " + card.modelData.name
+                                        enabled: !worker.running
+                                        onClicked: {
+                                            root.removalReturnPage = root.page
+                                            root.removingServiceId = card.modelData.id
+                                            root.errorMessage = ""
+                                            root.page = "remove"
+                                        }
                                     }
                                 }
                             }
