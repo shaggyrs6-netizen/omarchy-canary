@@ -57,8 +57,8 @@ Panel {
         if (!previewTimer.running) return serviceIndicator(dataModel.rows, nowSeconds)
         const affected = previewStep % 3
         const sample = serviceIndicator([
-            {alert: true, healthKnown: true, checked: nowSeconds, active: affected >= 1},
-            {alert: true, healthKnown: true, checked: nowSeconds, active: affected >= 2}
+            {name: "Example service A", alert: true, healthKnown: true, checked: nowSeconds, active: affected >= 1},
+            {name: "Example service B", alert: true, healthKnown: true, checked: nowSeconds, active: affected >= 2}
         ], nowSeconds)
         return {level: sample.level, detail: "Preview · " + sample.detail}
     }
@@ -81,15 +81,15 @@ Panel {
     function serviceIndicator(rows, now) {
         const selected = rows.filter(row => row.alert)
         const known = selected.filter(row => row.healthKnown && now - row.checked <= 900)
-        const affected = known.filter(row => row.active).length
+        const affected = known.filter(row => row.active)
         const unknown = selected.length - known.length
         const stale = selected.filter(row => row.missingActive || row.cachedActive && !known.includes(row)).length
         let level = "neutral"
         let detail = "No services selected for alerts"
         if (selected.length) {
-            if (affected) {
-                level = affected === 1 ? "amber" : "red"
-                detail = affected === 1 ? "1 selected service affected" : affected + " selected services affected"
+            if (affected.length) {
+                level = affected.length === 1 ? "amber" : "red"
+                detail = affected.length === 1 ? "1 selected service affected" : affected.length + " selected services affected"
                 if (unknown) detail += " · " + unknown + " without current status"
             } else if (stale || unknown) {
                 level = "unknown"
@@ -101,6 +101,11 @@ Panel {
             }
         }
         if (stale) detail += " · " + stale + (stale === 1 ? " cached incident feed" : " cached incident feeds")
+        const nameLimit = 6
+        for (const row of affected.slice(0, nameLimit))
+            detail += "\n" + row.name
+        if (affected.length > nameLimit)
+            detail += "\n+" + (affected.length - nameLimit) + " more · open Canary for details"
         return {level: level, detail: detail, stale: stale > 0}
     }
 

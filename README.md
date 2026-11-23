@@ -16,7 +16,7 @@ If your provider is missing, choose **Add my own service**, enter a name, and pa
 
 To delete a custom service, choose **Remove** on its row and confirm. This also clears its Canary alert choice and saved incident history. Use the star to unpin a service and keep it in the directory.
 
-Most alert choices are whole provider feeds. Grok Bot is filtered to its labelled notices. AWS and Azure report public notices, and their rows do not assert service health or recovery. The other sources require an explicit resolution for a recovery notification. A missing incident stays in the last known state. Feed failures retain cached incidents, and the panel marks older data as unknown. The panel shows when each cached incident was last seen. A purple canary means current status is unavailable. A purple dot beside an amber or red canary means cached incidents also need confirmation. Only feeds selected for alerts affect the bar indicator.
+Most alert choices are whole provider feeds. Grok Bot is filtered to its labelled notices. AWS and Azure report public notices, and their rows do not assert service health or recovery. The other sources require an explicit resolution for a recovery notification. A missing incident stays in the last known state. Feed failures retain cached incidents, and the panel marks older data as unknown. The panel shows when each cached incident was last seen. A purple canary means current status is unavailable. A purple dot beside an amber or red canary means cached incidents also need confirmation. Only feeds selected for alerts affect the bar indicator. Hover over the bird to see the names of services with current incidents.
 
 Local data lives in `$XDG_STATE_HOME/omarchy-service-outages` or `~/.local/state/omarchy-service-outages`. The only desktop dependencies beyond Omarchy are Python 3 and `notify-send`.
 
@@ -33,6 +33,8 @@ For an existing Git-managed installation, run `omarchy plugin update shaggyrs6.s
 To disable the widget, run `omarchy plugin disable shaggyrs6.service-outages`.
 
 ## Screenshots
+
+![Bar tooltip listing Claude as the affected service](screenshots/affected-services-tooltip.png)
 
 ![Canary test notification with the yellow radar-dish canary](screenshots/radar-canary-test-alert.png)
 
