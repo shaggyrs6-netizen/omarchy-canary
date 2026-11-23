@@ -10,7 +10,7 @@ Choose **Send test alert** in Settings to see a sample desktop notification. You
 
 ## Find and add services
 
-Open **Add a service**, then select the country button and search by country name or code. Local provider suggestions are included for the US, UK, Canada and Australia. Global feeds and custom favourites are available for every country. Canary stores your selection on this device. Some providers link to their own alert setup. Consumer reports open in your browser.
+Open **Add a service**, then select the country button and search by country name or code. Local provider suggestions are included for the US, UK, Canada, Australia and the Netherlands. Global feeds and custom favourites are available for every country. Canary stores your selection on this device. Some providers link to their own alert setup. Consumer reports open in your browser.
 
 If your provider is missing, choose **Add my own service**, enter a name, and paste the provider’s public status page or outage checker. Canary checks compatible HTTPS Atlassian Statuspage URLs for a public incident history. Paste the status page’s main URL or its public API URL. When the feed validates, **Enable alerts** turns on Canary notifications using the first check as a quiet baseline. Enable **Background checks** for alerts while the panel is closed. If Canary cannot read a supported feed, the service is saved as a favourite with a browser shortcut. To retry feed detection later, add the same address again. Custom services and alert preferences are stored locally.
 
