@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "shaggyrs6.service-outages",
   "name": "Omarchy Canary",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": "Lee",
   "description": "Official service incidents, consumer status links and optional desktop alerts",
   "kinds": ["bar-widget"],

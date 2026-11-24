@@ -4,13 +4,17 @@
 
 Click the canary icon to open the panel. The first open checks fifteen free official sources. Use **Check now** to refresh the feeds and run the local connection check if enabled. Select **Enable alerts** beside a feed to opt in. The first successful check of each feed establishes a quiet baseline.
 
-**Settings** has background checks, a local reachability check, quiet hours from 10 pm to 8 am, and a one-hour pause. Background checks and reachability start off. Background mode runs within the bar, checks every five minutes, and backs off on source errors. The local check tries HTTPS endpoints run by Google and Cloudflare and shows whether this PC can reach the internet. The main panel starts with favourites. Enable **Show all services on main panel** to show the country directory below them.
+**Affected now** appears at the top of the main panel when a favourite or alert-enabled service has a current incident. It shows the provider’s incident title, affected components when reported, and the time of the last successful check. The rest of the panel starts with favourites. Enable **Show all services on main panel** to include the country directory.
 
-Choose **Send test alert** in Settings to see a sample desktop notification. You can send it with no alert subscriptions and while Canary alerts are paused.
+**Settings** has background checks, a local reachability check, quiet hours from 10 pm to 8 am, and a one-hour pause. Background checks and reachability start off. Background mode runs within the bar, checks every five minutes, and backs off on source errors. The local check tries HTTPS endpoints run by Google and Cloudflare and shows whether this PC can reach the internet.
+
+Desktop alerts include the incident title and affected components when reported. Use **Open status page** on an Omarchy notification to visit the provider. Choose **Send test alert** in Settings to try a sample, even with no alert subscriptions or while Canary alerts are paused.
 
 ## Find and add services
 
 Open **Add a service**, then select the country button and search by country name or code. Local provider suggestions are included for the US, UK, Canada, Australia and the Netherlands. Global feeds and custom favourites are available for every country. Canary stores your selection on this device. Some providers link to their own alert setup. Consumer reports open in your browser.
+
+Search recognises aliases such as **Charter** for Spectrum and **Comcast** for Xfinity. Directory labels help you tell **Canary alerts**, **Provider outage checker** and other link types apart.
 
 If your provider is missing, choose **Add my own service**, enter a name, and paste the provider’s public status page or outage checker. Canary checks compatible HTTPS Atlassian Statuspage URLs for a public incident history. Paste the status page’s main URL or its public API URL. When the feed validates, **Enable alerts** turns on Canary notifications using the first check as a quiet baseline. Enable **Background checks** for alerts while the panel is closed. If Canary cannot read a supported feed, the service is saved as a favourite with a browser shortcut. To retry feed detection later, add the same address again. Custom services and alert preferences are stored locally.
 
@@ -34,9 +38,15 @@ To disable the widget, run `omarchy plugin disable shaggyrs6.service-outages`.
 
 ## Screenshots
 
-![Bar tooltip listing Claude as the affected service](screenshots/affected-services-tooltip.png)
+![Affected now with example GitHub and Discord incidents](screenshots/affected-now.png)
 
-![Canary test notification with the yellow radar-dish canary](screenshots/radar-canary-test-alert.png)
+![Live Canary test notification showing a sample incident and the Open status page button](screenshots/incident-test-notification.png)
+
+| Provider alias search | Netherlands directory |
+| --- | --- |
+| ![Searching for Comcast finds the Xfinity outage checker](screenshots/provider-search-comcast.png) | ![Dutch broadband, mobile, power and gas outage links](screenshots/netherlands-directory.png) |
+
+![Bar tooltip listing Claude as the affected service](screenshots/affected-services-tooltip.png)
 
 | Country picker | Add a custom service |
 | --- | --- |
@@ -52,6 +62,10 @@ To disable the widget, run `omarchy plugin disable shaggyrs6.service-outages`.
 
 [MIT](LICENSE)
 
+
+## Contributing provider entries
+
+To contribute a provider directory entry, add its country code, service name and public outage URL to `LINKS` in `outages.py`. Add alternate names to `SEARCH_ALIASES` where they help people find the provider. Verify that the provider page opens and that its entry appears with the right country selected. Thanks to [@tolixx](https://github.com/tolixx) for the [Netherlands directory](https://github.com/shaggyrs6-netizen/omarchy-canary/pull/1).
 
 ## Running tests
 

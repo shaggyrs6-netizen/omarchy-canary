@@ -36,7 +36,7 @@ class OutageTests(unittest.TestCase):
         incident = outages.incident("abc", "Service issue", "active", 1)
         state, _ = outages.merge({}, [], 1)
         state, changes = outages.merge(state, [incident], 2)
-        self.assertEqual(changes, ["active"])
+        self.assertEqual(changes, [("active", incident)])
         state, changes = outages.merge(state, [incident], 3)
         self.assertEqual(changes, [])
         state, changes = outages.merge(state, [], 4)
@@ -47,12 +47,13 @@ class OutageTests(unittest.TestCase):
         self.assertTrue(github["cachedActive"])
         self.assertFalse(github["active"])
         self.assertFalse(github["healthKnown"])
+        self.assertFalse(github["details"][0]["current"])
         severity = dict(incident, severity=2)
         state, changes = outages.merge(state, [severity], 5)
-        self.assertEqual(changes, ["escalated"])
+        self.assertEqual(changes, [("escalated", severity)])
         resolved = dict(severity, state="resolved")
         state, changes = outages.merge(state, [resolved], 6)
-        self.assertEqual(changes, ["resolved"])
+        self.assertEqual(changes, [("resolved", resolved)])
         _, changes = outages.merge(state, [resolved], 7)
         self.assertEqual(changes, [])
 
@@ -179,7 +180,10 @@ outages.main(["refresh"])
             with patch.multiple(outages, SOURCES={}, read_custom_feed=lambda _: [dict(baseline, state="resolved")]), \
                     patch.object(outages, "send_notification") as notify:
                 run("refresh")
-                notify.assert_called_once_with("My provider · resolved")
+                notify.assert_called_once_with(
+                    "My provider · resolved · Existing incident",
+                    [{"label": "Open status page", "argv": ["xdg-open", "https://status.example.org/"]}],
+                )
             run("country", "GB")
             self.assertTrue(next(row for row in run("status")["rows"] if row["id"] == key)["favourite"])
 
@@ -247,13 +251,53 @@ outages.main(["refresh"])
                 self.assertEqual(json.loads(output.getvalue()), {"testAlertSent": sent})
                 icon = Path(outages.__file__).resolve().with_name("notification-icon.png")
                 self.assertTrue(icon.is_file())
+                action = [{"label": "Open status page", "argv": ["xdg-open", outages.SOURCES["github"][3]]}]
                 notify.assert_called_once_with(
                     ["notify-send", "-a", "Omarchy Canary", "-h", f"string:image-path:{icon}",
-                     "--", "Omarchy Canary",
-                     "Test alert · Example service · new incident"], timeout=4, check=False,
+                     "-h", "string:omarchy-actions:" + json.dumps(action), "--", "Omarchy Canary",
+                     "Test alert · GitHub · example incident\nAPI requests failing"], timeout=4, check=False,
                 )
             self.assertEqual(saved.read_text(), original)
             self.assertEqual(list(Path(folder).iterdir()), [saved])
+
+    def test_incident_notification_titles_scopes_and_actions(self):
+        active = outages.incident("voice", "Voice calls failing", "active", 2, ["Voice"])
+        resolved = outages.incident("chat", "Delayed messages", "resolved", 1)
+        with patch.object(outages, "send_notification") as send:
+            outages.notify_incidents([
+                ("Discord", "https://discordstatus.com/", [("active", active), ("resolved", resolved)]),
+                ("Example", "file:///home/example", [("escalated", active)]),
+            ])
+        send.assert_called_once_with(
+            "Discord · new incident · Voice calls failing · Voice\n"
+            "Discord · resolved · Delayed messages\n"
+            "Example · impact increased · Voice calls failing · Voice",
+            [{"label": "Open Discord", "argv": ["xdg-open", "https://discordstatus.com/"]}],
+        )
+
+        with patch.object(outages, "send_notification") as send:
+            outages.notify_incidents([
+                (f"Service {i}", f"https://service{i}.example.com/", [("active", active)])
+                for i in range(5)
+            ])
+        message, actions = send.call_args.args
+        self.assertTrue(message.endswith("\n+1 more updates"))
+        self.assertEqual(len(actions), 3)
+        self.assertEqual(actions[-1]["argv"], ["omarchy-shell", "shaggyrs6.service-outages", "show"])
+
+    def test_current_incidents_take_precedence_over_cached_incidents(self):
+        cached = outages.incident("old", "Cached incident", "active")
+        fresh = outages.incident("current", "Current incident", "active", scope=["API"])
+        state, _ = outages.merge({}, [cached], 1)
+        state, _ = outages.merge(state, [fresh], 2)
+        result = outages.view({"sources": {"github": state}, "alerts": ["github"], "favourites": []})
+        github = next(row for row in result["rows"] if row["id"] == "github")
+        self.assertTrue(github["active"])
+        self.assertTrue(github["missingActive"])
+        self.assertEqual(github["details"], [
+            {"title": "Current incident · API", "confirmed": 2, "active": True, "current": True},
+            {"title": "Cached incident", "confirmed": 1, "active": True, "current": False},
+        ])
 
 
 if __name__ == "__main__":

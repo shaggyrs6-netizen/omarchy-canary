@@ -89,6 +89,25 @@ LINKS = {
     "m365": ("global", "Microsoft 365 / Teams", "Microsoft business status", "https://status.cloud.microsoft/m365"),
     "radar": ("global", "Cloudflare Radar", "Regional and network disruptions", "https://radar.cloudflare.com/outage-center"),
 }
+SEARCH_ALIASES = {
+    "xfinity": ("Comcast",),
+    "spectrum": ("Charter Communications",),
+    "cox": ("Cox Communications",),
+    "att": ("ATT",),
+    "att-mobile": ("ATT",),
+    "mte": ("MTE",),
+    "gcp": ("GCP",),
+    "workspace": ("G Suite",),
+}
+LINK_LABELS = {
+    "starlink": "Provider support",
+    "facebook": "Community outage reports",
+    "instagram": "Community outage reports",
+    "youtube": "Provider known issues",
+    "outlook": "Provider status page",
+    "m365": "Provider status page",
+    "radar": "Network outage reports",
+}
 DEFAULT_FAVOURITES = ("openai", "grok", "xfinity", "facebook", "youtube")
 LIMIT = 4 * 1024 * 1024
 STATE = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "omarchy-service-outages"
@@ -316,14 +335,14 @@ def merge(previous, incoming, now):
         state = row["state"]
         if previous.get("checked"):
             if state in ("active", "notice") and old is None:
-                changes.append(state)
+                changes.append((state, row))
             elif state == "active" and old and old["state"] != "active":
-                changes.append("active")
+                changes.append(("active", row))
             elif state == "active" and old and (row["severity"] > old["severity"]
                                                 or set(row["scope"]) - set(old["scope"])):
-                changes.append("escalated")
+                changes.append(("escalated", row))
             elif state == "resolved" and old and old["state"] == "active":
-                changes.append("resolved")
+                changes.append(("resolved", row))
         known[row["id"]] = dict(row, confirmed=now)
     events = list(known.values())
     active = [row for row in events if row["state"] == "active"]
@@ -367,7 +386,7 @@ def refresh(state, force):
             entry["retry"] = now + min(1800, 300 * 2 ** min(entry["failures"] - 1, 3))
         sources[key] = entry
         if key in state.get("alerts", []) and changes:
-            alerts.append((catalog[key][0], changes))
+            alerts.append((catalog[key][0], catalog[key][3], changes))
     if state.get("probe"):
         state["connection"] = "reachable" if reachable else "unverified"
         if pending_probes and not reachable:
@@ -430,22 +449,27 @@ def view(state):
             status = "Last known incident · awaiting confirmation"
         elif fresh_active and stale_active and not data.get("failures") and now - checked <= 900:
             status = f"{len(fresh_active)} currently reported · {len(stale_active)} awaiting confirmation"
-        details = active or latest_notices[:1]
+        details = fresh_active + stale_active or latest_notices[:1]
         rows.append(dict(id=key, name=name, url=url, status=status, checked=checked,
                          active=bool(fresh_active), cachedActive=bool(active), missingActive=bool(stale_active), alert=key in state.get("alerts", []),
                          healthKnown=bool(checked and not data.get("failures") and (not stale_active or fresh_active)
                                           and kind != "notices"),
-                         kind="feed", custom=key in custom, favourite=key in favourites, inDirectory=True,
+                         kind="feed", sourceLabel="Canary alerts", aliases=SEARCH_ALIASES.get(key, ()),
+                         custom=key in custom, favourite=key in favourites, inDirectory=True,
                          details=[dict(title=e["title"] + (" · " + ", ".join(e["scope"]) if e["scope"] else ""),
-                                       confirmed=e.get("confirmed", checked), active=e["state"] == "active")
+                                       confirmed=e.get("confirmed", checked), active=e["state"] == "active",
+                                       current=e in fresh_active)
                                   for e in details[:4]]))
     for key, (region, name, label, url, *alert_help) in LINKS.items():
         rows.append(dict(id=key, name=name, url=url, kind="link", status=label,
+                         sourceLabel=LINK_LABELS.get(key, "Provider outage checker"),
+                         aliases=SEARCH_ALIASES.get(key, ()),
                          favourite=key in favourites, details=[], inDirectory=region in ("global", country),
                          alertHelp=alert_help[0] if alert_help else ""))
     for key, entry in custom.items():
         if not entry.get("feed"):
             rows.append(dict(id=key, name=entry["name"], url=entry["url"], kind="link", custom=True,
+                             sourceLabel="Provider outage checker",
                              status="Outage checker", favourite=key in favourites, details=[], inDirectory=True))
     rows.sort(key=lambda row: (not row["favourite"], row["name"].casefold()))
     return dict(rows=rows, background=state.get("background", False), country=country, countries=COUNTRIES,
@@ -464,19 +488,47 @@ def save(state):
     finally:
         Path(file.name).unlink(missing_ok=True)
 
-def send_notification(body):
+def send_notification(body, actions=()):
     icon = Path(__file__).resolve().with_name("notification-icon.png")
-    result = subprocess.run(
-        ["notify-send", "-a", "Omarchy Canary", "-h", f"string:image-path:{icon}",
-         "--", "Omarchy Canary", body], timeout=4, check=False,
-    )
+    command = ["notify-send", "-a", "Omarchy Canary", "-h", f"string:image-path:{icon}"]
+    if actions:
+        command.extend(("-h", "string:omarchy-actions:" + json.dumps(actions)))
+    result = subprocess.run(command + ["--", "Omarchy Canary", body], timeout=4, check=False)
     return result.returncode == 0
+
+def notify_incidents(alerts):
+    labels = {"active": "new incident", "notice": "new notice", "escalated": "impact increased", "resolved": "resolved"}
+    lines = []
+    actions = []
+    for name, url, changes in alerts:
+        for change, event in changes:
+            scope = ", ".join(event["scope"][:2])
+            line = " · ".join((name, labels[change], clean(event["title"], 140)))
+            if scope:
+                line += " · " + clean(scope, 90)
+            lines.append(line)
+        try:
+            status_page = service_url(url)
+        except ValueError:
+            continue
+        label = "Open status page" if len(alerts) == 1 else "Open " + name
+        actions.append({"label": label, "argv": ["xdg-open", status_page]})
+    if len(actions) > 3:
+        actions = actions[:2] + [{"label": "Open Canary",
+                                 "argv": ["omarchy-shell", "shaggyrs6.service-outages", "show"]}]
+    visible = lines[:4]
+    if len(lines) > len(visible):
+        visible.append(f"+{len(lines) - len(visible)} more updates")
+    return send_notification("\n".join(visible), actions)
 
 def main(args):
     command = args[0]
     if command == "test-alert":
         try:
-            sent = send_notification("Test alert · Example service · new incident")
+            sent = send_notification(
+                "Test alert · GitHub · example incident\nAPI requests failing",
+                [{"label": "Open status page", "argv": ["xdg-open", SOURCES["github"][3]]}],
+            )
         except (OSError, subprocess.TimeoutExpired):
             sent = False
         print(json.dumps({"testAlertSent": sent}))
@@ -556,11 +608,8 @@ def main(args):
         muted = state.get("snooze", 0) > time.time() or (
             state.get("quiet") and (dt.datetime.now().hour < 8 or dt.datetime.now().hour >= 22))
         if alerts and not muted:
-            labels = {"active": "new incident", "notice": "new notice", "escalated": "impact increased", "resolved": "resolved"}
-            body = "\n".join(name + " · " + ", ".join(labels[c] for c in dict.fromkeys(changes))
-                             for name, changes in alerts)
             try:
-                send_notification(body)
+                notify_incidents(alerts)
             except (OSError, subprocess.TimeoutExpired):
                 pass
         result = view(state)

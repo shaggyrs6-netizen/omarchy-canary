@@ -30,6 +30,9 @@ Panel {
     readonly property string countryLabel: (dataModel.countries || {})[dataModel.country] || "United States"
     readonly property bool searchingCountries: countryQuery.trim().length > 0
     readonly property bool showCountryResults: pickingCountry && (searchingCountries || browseCountries)
+    readonly property var affectedServices: dataModel.rows.filter(row =>
+        (row.alert || row.favourite) && row.active && hasCurrentStatus(row, nowSeconds))
+    readonly property var affectedServiceIds: affectedServices.map(row => row.id)
     readonly property var matchingCountries: {
         if (!showCountryResults) return []
         const countries = dataModel.countries || {}
@@ -44,10 +47,11 @@ Panel {
     }
     readonly property var visibleServices: {
         if (settings || pickingCountry || addingCustom || confirmingRemoval) return []
-        if (!directory) return dataModel.rows.filter(row => row.favourite || (dataModel.showAll && row.inDirectory))
-        const term = query.trim().toLowerCase()
-        return dataModel.rows.filter(row => row.inDirectory
-            && (row.name + " " + row.status).toLowerCase().includes(term))
+        if (!directory) return dataModel.rows.filter(row => (row.favourite || (dataModel.showAll && row.inDirectory))
+            && !affectedServiceIds.includes(row.id))
+        const term = searchText(query.trim())
+        return dataModel.rows.filter(row => row.inDirectory && searchText(
+            [row.name, row.sourceLabel, row.status].concat(row.aliases || []).join(" ")).includes(term))
     }
     property string errorMessage: ""
     property bool testAlertSent: false
@@ -78,9 +82,13 @@ Panel {
         }
     }
 
+    function hasCurrentStatus(row, now) {
+        return row.healthKnown && now - row.checked <= 900
+    }
+
     function serviceIndicator(rows, now) {
         const selected = rows.filter(row => row.alert)
-        const known = selected.filter(row => row.healthKnown && now - row.checked <= 900)
+        const known = selected.filter(row => hasCurrentStatus(row, now))
         const affected = known.filter(row => row.active)
         const unknown = selected.length - known.length
         const stale = selected.filter(row => row.missingActive || row.cachedActive && !known.includes(row)).length
@@ -112,7 +120,7 @@ Panel {
     Timer {
         interval: 15000
         repeat: true
-        running: root.dataModel.rows.some(row => row.alert)
+        running: root.dataModel.rows.some(row => row.alert || (row.favourite && row.kind === "feed"))
         onTriggered: root.nowSeconds = Date.now() / 1000
     }
     readonly property string helper: decodeURIComponent(Qt.resolvedUrl("outages.py").toString().replace(/^file:\/\//, ""))
@@ -120,6 +128,10 @@ Panel {
 
     function when(timestamp) {
         return new Date(timestamp * 1000).toLocaleString(Qt.locale(I18n.formatLocale))
+    }
+
+    function timeOfDay(timestamp) {
+        return new Date(timestamp * 1000).toLocaleTimeString(Qt.locale(I18n.formatLocale))
     }
 
     function open() {
@@ -313,7 +325,7 @@ Panel {
                     Layout.fillWidth: true
                         visible: !!root.errorMessage || (!root.addingCustom && !root.pickingCountry && !root.confirmingRemoval)
                     text: root.errorMessage || (root.dataModel.attempt
-                        ? "Last refresh attempt " + new Date(root.dataModel.attempt * 1000).toLocaleTimeString(Qt.locale(I18n.formatLocale))
+                        ? "Last refresh attempt " + root.timeOfDay(root.dataModel.attempt)
                         : "Awaiting first check")
                     font.pixelSize: Style.font.caption
                 }
@@ -582,19 +594,37 @@ Panel {
                         }
 
                         Copy {
-                            visible: root.page === "favourites"
+                            visible: root.page === "favourites" && root.affectedServices.length > 0
+                            text: "Affected now"
+                            font.bold: true
+                        }
+                        Repeater {
+                            model: root.page === "favourites" ? root.affectedServices : []
+                            delegate: serviceCard
+                        }
+                        Copy {
+                            visible: root.page === "favourites" && root.visibleServices.length > 0
                             text: root.dataModel.showAll ? "Services · favourites first" : "Favourites"
                             font.bold: true
                         }
                         Copy {
-                            visible: (root.directory || root.page === "favourites") && !root.visibleServices.length
+                            visible: (root.directory || (root.page === "favourites" && !root.affectedServices.length))
+                                     && !root.visibleServices.length
                             text: root.directory ? "No matching services" : "Use Add a service to choose favourites."
                         }
                         Repeater {
                             model: root.visibleServices
-                            delegate: Rectangle {
+                            delegate: serviceCard
+                        }
+                        Component {
+                            id: serviceCard
+                            Rectangle {
                                 id: card
                                 required property var modelData
+                                readonly property bool affected: root.page === "favourites"
+                                    && root.affectedServiceIds.includes(modelData.id)
+                                readonly property var incidents: affected
+                                    ? modelData.details.filter(entry => entry.current) : modelData.details
                                 Layout.fillWidth: true
                                 implicitHeight: row.implicitHeight + Style.space(14)
                                 color: Qt.alpha(root.ink, .06)
@@ -608,15 +638,28 @@ Panel {
                                         Layout.fillWidth: true
                                         Layout.minimumWidth: 0
                                         Copy { Layout.fillWidth: true; text: card.modelData.name; font.bold: true }
+                                        Copy {
+                                            Layout.fillWidth: true
+                                            visible: root.directory
+                                            text: card.modelData.sourceLabel || ""
+                                            font.pixelSize: Style.font.caption
+                                            font.bold: true
+                                        }
                                         Copy { Layout.fillWidth: true; text: card.modelData.checked && root.nowSeconds - card.modelData.checked > 900
                                                   ? "Status unknown · last check is stale" : card.modelData.status
                                             font.pixelSize: Style.font.caption }
                                         Copy {
                                             Layout.fillWidth: true
-                                            visible: !root.settings && card.modelData.details.length > 0
-                                            text: card.modelData.details.map(entry =>
-                                                entry.title + (entry.active && entry.confirmed
+                                            visible: card.incidents.length > 0
+                                            text: card.incidents.map(entry =>
+                                                entry.title + (!card.affected && entry.active && entry.confirmed
                                                     ? " · Last reported " + root.when(entry.confirmed) : "")).join("\n")
+                                            font.pixelSize: Style.font.caption
+                                        }
+                                        Copy {
+                                            Layout.fillWidth: true
+                                            visible: card.affected
+                                            text: card.affected ? "Last checked " + root.timeOfDay(card.modelData.checked) : ""
                                             font.pixelSize: Style.font.caption
                                         }
                                     }
@@ -639,7 +682,7 @@ Panel {
                                         onClicked: Qt.openUrlExternally(card.modelData.alertHelp)
                                     }
                                     Action {
-                                        text: card.modelData.kind === "feed" ? "Open" : "Check"
+                                        text: card.affected ? "Status page" : card.modelData.kind === "feed" ? "Open" : "Check"
                                         onClicked: Qt.openUrlExternally(card.modelData.url)
                                     }
                                     Action {
