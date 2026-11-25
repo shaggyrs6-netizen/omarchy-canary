@@ -4,6 +4,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 Panel {
@@ -15,10 +16,16 @@ Panel {
     property var dataModel: ({rows: [], connection: "unchecked"})
     property string page: "favourites"
     property string query: ""
+    property string serviceCategory: ""
+    readonly property var categoryOptions: ["All categories"].concat(dataModel.categories || [])
     property string countryQuery: ""
     property bool browseCountries: false
     property string addedServiceId: ""
     property string removingServiceId: ""
+    property bool recoveriesExpanded: false
+    property bool visitPending: false
+    readonly property var recentRecoveries: (dataModel.recoveries || []).filter(
+        entry => nowSeconds - entry.at < 86400)
     property string removalReturnPage: "favourites"
     readonly property bool settings: page === "settings"
     readonly property bool directory: page === "directory"
@@ -50,7 +57,8 @@ Panel {
         if (!directory) return dataModel.rows.filter(row => (row.favourite || (dataModel.showAll && row.inDirectory))
             && !affectedServiceIds.includes(row.id))
         const term = searchText(query.trim())
-        return dataModel.rows.filter(row => row.inDirectory && searchText(
+        return dataModel.rows.filter(row => row.inDirectory
+            && (!serviceCategory || row.category === serviceCategory) && searchText(
             [row.name, row.sourceLabel, row.status].concat(row.aliases || []).join(" ")).includes(term))
     }
     property string errorMessage: ""
@@ -124,7 +132,7 @@ Panel {
         onTriggered: root.nowSeconds = Date.now() / 1000
     }
     readonly property string helper: decodeURIComponent(Qt.resolvedUrl("outages.py").toString().replace(/^file:\/\//, ""))
-    readonly property color ink: bar ? bar.foreground : Color.foreground
+    readonly property color ink: bar ? bar.foreground : Commons.Color.foreground
 
     function when(timestamp) {
         return new Date(timestamp * 1000).toLocaleString(Qt.locale(I18n.formatLocale))
@@ -155,15 +163,21 @@ Panel {
             page = "favourites"
         } else {
             query = ""
+            serviceCategory = ""
             page = "directory"
         }
         errorMessage = ""
     }
     function run(args) {
-        if (worker.running) return
+        const checking = ["refresh", "visit", "poll"].includes(args[0])
+        const process = checking ? refreshWorker : worker
+        if (process.running) {
+            if (args[0] === "visit") visitPending = true
+            return
+        }
         errorMessage = ""
-        worker.command = ["python3", helper].concat(args)
-        worker.running = true
+        process.command = ["python3", helper].concat(args)
+        process.running = true
     }
     Component.onCompleted: run(["poll"])
 
@@ -217,16 +231,21 @@ Panel {
         }
         onClicked: root.run(["country", code])
     }
-    Process {
-        id: worker
+    component CanaryWorker: Process {
+        id: process
         stdout: StdioCollector { id: output; waitForEnd: true }
         stderr: StdioCollector { id: diagnostics; waitForEnd: true }
         onExited: function(code) {
+            const operation = process.command[2]
+            if (process === refreshWorker && root.visitPending) {
+                root.visitPending = false
+                if (root.opened) Qt.callLater(() => root.run(["visit"]))
+            }
             if (diagnostics.text.trim()) console.warn(diagnostics.text.trim())
             try {
                 if (code !== 0) throw new Error("failed")
                 const result = JSON.parse(output.text)
-                if (worker.command[2] === "test-alert") {
+                if (operation === "test-alert") {
                     if (!result.testAlertSent) throw new Error("notification failed")
                     root.testAlertSent = true
                     return
@@ -236,24 +255,31 @@ Panel {
                     return
                 }
                 root.nowSeconds = Date.now() / 1000
-                root.dataModel = result
-                if (worker.command[2] === "country" && root.pickingCountry)
+                if ((result.revision || 0) >= (root.dataModel.revision || 0))
+                    root.dataModel = result
+                if (operation === "country" && root.pickingCountry) {
+                    if (!(root.dataModel.categories || []).includes(root.serviceCategory))
+                        root.serviceCategory = ""
                     root.page = "directory"
+                }
                 if (result.added && root.addingCustom)
                     root.addedServiceId = result.added
-                if (worker.command[2] === "remove-custom" && root.confirmingRemoval)
+                if (operation === "remove-custom" && root.confirmingRemoval)
                     root.goBack()
-                if (root.opened && !root.dataModel.attempt && worker.command[2] === "poll")
+                if (root.opened && !root.dataModel.attempt && operation === "poll")
                     Qt.callLater(() => root.run(["visit"]))
             } catch (_) {
-                root.errorMessage = worker.command[2] === "add-custom" ? "Could not save the service. Try again."
-                    : worker.command[2] === "remove-custom" ? "Could not remove the service. Try again."
-                    : worker.command[2] === "country" ? "Could not save the country. Try again."
-                    : worker.command[2] === "test-alert" ? "Could not send the test alert. Try again."
-                    : "Could not complete the check. Try Check now."
+                root.errorMessage = operation === "add-custom" ? "Could not save the service. Try again."
+                    : operation === "remove-custom" ? "Could not remove the service. Try again."
+                    : operation === "country" ? "Could not save the country. Try again."
+                    : operation === "test-alert" ? "Could not send the test alert. Try again."
+                    : process === refreshWorker ? "Could not complete the check. Try Check now."
+                    : "Could not save the change. Try again."
             }
         }
     }
+    CanaryWorker { id: worker }
+    CanaryWorker { id: refreshWorker }
     Timer {
         interval: 300000
         repeat: true
@@ -303,8 +329,8 @@ Panel {
                     }
                     Action {
                         visible: !root.addingCustom && !root.pickingCountry && !root.confirmingRemoval
-                        text: worker.running ? "Checking…" : "Check now"
-                        enabled: !worker.running
+                        text: refreshWorker.running ? "Checking…" : "Check now"
+                        enabled: !refreshWorker.running
                         onClicked: root.run(["refresh"])
                     }
                     Action {
@@ -495,12 +521,71 @@ Panel {
                                     }
                                 }
                             }
-                            Field {
-                                id: serviceSearch
-                                placeholderText: "Search services"
-                                Accessible.name: "Search services"
-                                text: root.query
-                                onTextEdited: root.query = text
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Field {
+                                    id: serviceSearch
+                                    placeholderText: "Search services"
+                                    Accessible.name: "Search services"
+                                    text: root.query
+                                    onTextEdited: root.query = text
+                                }
+                                Controls.ComboBox {
+                                    id: categoryPicker
+                                    Layout.preferredWidth: Style.space(165)
+                                    Accessible.name: "Service category"
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    model: root.categoryOptions
+                                    currentIndex: Math.max(0, root.categoryOptions.indexOf(root.serviceCategory))
+                                    onActivated: index => root.serviceCategory = index ? root.categoryOptions[index] : ""
+                                    contentItem: Copy {
+                                        text: categoryPicker.displayText
+                                        leftPadding: Style.space(8)
+                                        rightPadding: Style.space(22)
+                                        verticalAlignment: Text.AlignVCenter
+                                        wrapMode: Text.NoWrap
+                                        elide: Text.ElideRight
+                                    }
+                                    indicator: Copy {
+                                        x: categoryPicker.width - width - Style.space(8)
+                                        y: (categoryPicker.height - height) / 2
+                                        text: "▾"
+                                    }
+                                    background: Rectangle {
+                                        radius: Style.space(5)
+                                        color: Qt.alpha(root.ink, categoryPicker.down ? 0.20 : 0.06)
+                                        border.color: Qt.alpha(root.ink, categoryPicker.activeFocus ? 0.7 : 0.18)
+                                    }
+                                    delegate: Controls.ItemDelegate {
+                                        id: categoryOption
+                                        required property int index
+                                        required property string modelData
+                                        width: categoryPicker.width
+                                        text: modelData
+                                        highlighted: categoryPicker.highlightedIndex === index
+                                        contentItem: Copy { text: categoryOption.text }
+                                        background: Rectangle {
+                                            color: Qt.alpha(root.ink, categoryOption.highlighted || categoryOption.hovered ? 0.13 : 0)
+                                        }
+                                    }
+                                    popup: Controls.Popup {
+                                        y: categoryPicker.height
+                                        width: categoryPicker.width
+                                        padding: 1
+                                        contentItem: ListView {
+                                            implicitHeight: contentHeight
+                                            clip: true
+                                            model: categoryPicker.popup.visible ? categoryPicker.delegateModel : null
+                                            currentIndex: categoryPicker.highlightedIndex
+                                        }
+                                        background: Rectangle {
+                                            radius: Style.space(5)
+                                            color: Commons.Color.popups.background
+                                            border.color: Qt.alpha(root.ink, 0.20)
+                                        }
+                                    }
+                                }
                             }
                             Copy {
                                 Layout.fillWidth: true
@@ -602,6 +687,39 @@ Panel {
                             model: root.page === "favourites" ? root.affectedServices : []
                             delegate: serviceCard
                         }
+                        Action {
+                            visible: root.page === "favourites"
+                            text: (root.recoveriesExpanded ? "▾ " : "▸ ") + "Resolved recently · 24h"
+                                + (root.recentRecoveries.length ? " · " + root.recentRecoveries.length : "")
+                            Accessible.name: "Resolved recently in the last 24 hours"
+                            onClicked: root.recoveriesExpanded = !root.recoveriesExpanded
+                        }
+                        Copy {
+                            Layout.fillWidth: true
+                            visible: root.page === "favourites" && root.recoveriesExpanded && !root.recentRecoveries.length
+                            text: "No recorded recoveries in the last 24 hours."
+                        }
+                        Repeater {
+                            model: root.page === "favourites" && root.recoveriesExpanded ? root.recentRecoveries : []
+                            delegate: RowLayout {
+                                id: recovery
+                                required property var modelData
+                                Layout.fillWidth: true
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
+                                    Copy { Layout.fillWidth: true; text: recovery.modelData.name; font.bold: true }
+                                    Copy { Layout.fillWidth: true; text: recovery.modelData.title }
+                                    Copy {
+                                        Layout.fillWidth: true
+                                        font.pixelSize: Style.font.caption
+                                        text: (recovery.modelData.reported ? "Provider resolved " : "Canary saw recovery ")
+                                            + root.when(recovery.modelData.at)
+                                    }
+                                }
+                                Action { text: "Status page"; onClicked: Qt.openUrlExternally(recovery.modelData.url) }
+                            }
+                        }
                         Copy {
                             visible: root.page === "favourites" && root.visibleServices.length > 0
                             text: root.dataModel.showAll ? "Services · favourites first" : "Favourites"
@@ -682,7 +800,8 @@ Panel {
                                         onClicked: Qt.openUrlExternally(card.modelData.alertHelp)
                                     }
                                     Action {
-                                        text: card.affected ? "Status page" : card.modelData.kind === "feed" ? "Open" : "Check"
+                                        text: card.affected ? "Status page" : card.modelData.kind === "feed" ? "Open"
+                                            : card.modelData.sourceLabel === "Provider support" ? "Help" : "Check"
                                         onClicked: Qt.openUrlExternally(card.modelData.url)
                                     }
                                     Action {

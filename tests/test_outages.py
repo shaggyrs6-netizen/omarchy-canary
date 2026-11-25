@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 from threading import Event
+import time
 import unittest
 from unittest.mock import patch
 
@@ -214,6 +215,7 @@ outages.main(["refresh"])
             self.assertEqual(saved, {
                 "country": "GB", "background": True, "custom": {},
                 "favourites": ["github"], "alerts": ["github"], "sources": {"github": {}},
+                "revision": 5,
             })
 
     def test_custom_feed_requires_statuspage_metadata_and_ignores_maintenance(self):
@@ -298,6 +300,110 @@ outages.main(["refresh"])
             {"title": "Current incident · API", "confirmed": 2, "active": True, "current": True},
             {"title": "Cached incident", "confirmed": 1, "active": True, "current": False},
         ])
+
+    def test_builtin_history_and_api_urls_match_existing_service(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(outages, "STATE", Path(folder)), \
+                patch.object(outages, "read_custom_feed") as read:
+            for url in ("https://status.openai.com/history", "https://status.openai.com/api/v2/incidents.json",
+                        "https://www.githubstatus.com/history"):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    outages.main(["add-custom", "Example", url])
+                self.assertEqual(json.loads(output.getvalue())["added"], "openai" if "openai" in url else "github")
+            read.assert_not_called()
+            self.assertFalse(outages.read_state().get("custom"))
+
+    def test_recent_recoveries_use_stable_timestamps(self):
+        active = outages.incident("active", "Observed recovery", "active")
+        resolved = dict(active, state="resolved")
+        old = outages.incident("old", "Old recovery", "resolved", resolved_at="2025-01-01T12:00:00Z")
+        recent = outages.incident("recent", "Provider recovery", "resolved",
+                                  resolved_at="2025-01-02T12:00:00Z")
+        now = recent["resolvedAt"] + 50
+        cache, _ = outages.merge({}, [active, old], now - 100)
+        cache, _ = outages.merge(cache, [resolved, old, recent], now)
+        cache, changes = outages.merge(cache, [resolved, old, recent], now + 200)
+        self.assertEqual(changes, [])
+        with patch.object(outages.time, "time", return_value=now + 200):
+            items = outages.view({"favourites": ["github"], "sources": {"github": cache}})["recoveries"]
+        self.assertEqual([(item["title"], item["at"], item["reported"]) for item in items],
+                         [("Observed recovery", now, False),
+                          ("Provider recovery", recent["resolvedAt"], True)])
+
+    def test_background_scope_does_not_throttle_full_directory_check(self):
+        catalog = {key: outages.SOURCES[key] for key in ("github", "slack")}
+        state = {"favourites": [], "alerts": ["github"]}
+        with patch.object(outages, "SOURCES", catalog), patch.object(outages, "read_source", return_value=[]) as read:
+            outages.refresh(state, False, selected_only=True)
+            read.assert_called_once_with("github")
+            read.reset_mock()
+            outages.refresh(state, False)
+            self.assertEqual({call.args[0] for call in read.call_args_list}, {"github", "slack"})
+
+    def test_directory_categories_keep_regional_services_and_links_distinct(self):
+        us, gb, ca = (outages.view({"country": country}) for country in ("US", "GB", "CA"))
+        def rows(model):
+            return {row["id"]: row for row in model["rows"] if row["inDirectory"]}
+
+        for model in (us, gb, ca):
+            directory = rows(model)
+            self.assertIn("Gaming", model["categories"])
+            self.assertEqual(directory["epic"]["kind"], "feed")
+            self.assertEqual(directory["steam"]["sourceLabel"], "Community status dashboard")
+            self.assertEqual(directory["m365"]["category"], "Apps & cloud")
+            self.assertIn("MS Teams", directory["m365"]["aliases"])
+        self.assertEqual(rows(us)["chase"]["sourceLabel"], "Provider support")
+        self.assertEqual(rows(us)["cash-app"]["kind"], "feed")
+        self.assertEqual(rows(gb)["lloyds"]["category"], "Banking")
+        self.assertEqual(rows(ca)["interac"]["category"], "Payments")
+        self.assertNotIn("chase", rows(gb))
+        self.assertNotIn("cash-app", rows(ca))
+        self.assertNotIn("lloyds", rows(us))
+
+    def test_us_feed_is_checked_elsewhere_only_if_selected(self):
+        with patch.object(outages, "SOURCES", {"cash-app": outages.SOURCES["cash-app"]}), \
+                patch.object(outages, "read_source", return_value=[]) as read:
+            outages.refresh({"country": "GB"}, False)
+            read.assert_not_called()
+            outages.refresh({"country": "GB", "alerts": ["cash-app"]}, False)
+            read.assert_called_once_with("cash-app")
+
+    def test_preference_changes_can_finish_during_refresh_and_survive_commit(self):
+        code = """
+import time
+import outages
+
+outages.SOURCES = {"github": outages.SOURCES["github"]}
+def read_source(key):
+    (outages.STATE / "started").touch()
+    while not (outages.STATE / "finish").exists():
+        time.sleep(0.02)
+    return []
+outages.read_source = read_source
+outages.main(["refresh"])
+"""
+        with tempfile.TemporaryDirectory() as folder:
+            env = {**os.environ, "XDG_STATE_HOME": folder}
+            state = Path(folder) / "omarchy-service-outages"
+            state.mkdir()
+            with subprocess.Popen([sys.executable, "-B", "-c", code], env=env,
+                                  stdout=subprocess.PIPE, text=True) as refreshing:
+                try:
+                    deadline = time.monotonic() + 3
+                    while not (state / "started").exists() and time.monotonic() < deadline:
+                        time.sleep(0.02)
+                    self.assertTrue((state / "started").exists())
+                    for command in ("favourite", "alert"):
+                        subprocess.run([sys.executable, "-B", str(Path(outages.__file__)), command, "github"],
+                                       env=env, stdout=subprocess.DEVNULL, check=True, timeout=1.5)
+                    self.assertIsNone(refreshing.poll())
+                finally:
+                    (state / "finish").touch()
+                output, _ = refreshing.communicate(timeout=3)
+                self.assertEqual(refreshing.returncode, 0)
+            snapshot = json.loads(output)
+            row = next(row for row in snapshot["rows"] if row["id"] == "github")
+            self.assertTrue(row["favourite"] and row["alert"] and row["checked"])
 
 
 if __name__ == "__main__":

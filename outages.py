@@ -38,7 +38,10 @@ SOURCES = {
     "zoom": ("Zoom", "summary", "https://www.zoomstatus.com/api/v2/incidents.json", "https://www.zoomstatus.com/"),
     "slack": ("Slack", "slack", "https://slack-status.com/api/v2.0.0/history", "https://slack-status.com/"),
     "azure": ("Azure public notices", "notices", "https://rssfeed.azure.status.microsoft/en-us/status/feed/", "https://azure.status.microsoft/en-us/status/"),
+    "epic": ("Epic Games / Fortnite", "custom-statuspage", "https://status.epicgames.com/api/v2/incidents.json", "https://status.epicgames.com/"),
+    "cash-app": ("Cash App", "custom-statuspage", "https://status.cash.app/api/v2/incidents.json", "https://status.cash.app/"),
 }
+SOURCE_COUNTRIES = {"cash-app": "US"}
 COUNTRIES = {"global": "Other / global", **json.loads(
     Path(__file__).with_name("countries.json").read_text(encoding="utf-8"))}
 # ID -> country, name, kind of check, provider page, provider alert help (optional).
@@ -59,6 +62,19 @@ LINKS = {
     "tmobile": ("US", "T-Mobile Wireless", "Mobile · provider sign-in", "https://network.t-mobile.com/"),
     "att-mobile": ("US", "AT&T Wireless", "Mobile · local outage checker", "https://www.att.com/outages/"),
     "mte": ("US", "Middle Tennessee Electric", "Local power · outage map", "https://mte.com/outages", "https://mte.com/emergency-management-and-outage-alerts"),
+    "chase": ("US", "Chase", "Online and mobile banking support", "https://www.chase.com/digital/customer-service"),
+    "bank-of-america": ("US", "Bank of America", "Online banking support", "https://www.bankofamerica.com/customer-service/contact-us/online-banking/"),
+    "citi": ("US", "Citibank", "Personal banking support", "https://online.citi.com/US/ag/contactus"),
+    "wells-fargo": ("US", "Wells Fargo", "Online banking support", "https://www.wellsfargo.com/help/online-banking/"),
+    "us-bank": ("US", "U.S. Bank", "Online and mobile banking support", "https://www.usbank.com/customer-service/personal-banking/mobile-and-online-banking.html"),
+    "capital-one": ("US", "Capital One", "Account and sign-in support", "https://www.capitalone.com/help-center/"),
+    "pnc": ("US", "PNC Bank", "Online and mobile banking support", "https://www.pnc.com/en/customer-service/online-mobile-customer-service.html"),
+    "truist": ("US", "Truist", "Online and mobile banking support", "https://www.truist.com/contact/products-and-services-directory"),
+    "td-us": ("US", "TD Bank", "US personal banking support", "https://www.td.com/us/en/personal-banking/help-center"),
+    "venmo": ("US", "Venmo", "App error troubleshooting and support", "https://help.venmo.com/cs/articles/error-messages-vhel262"),
+    "zelle": ("US", "Zelle", "Payment troubleshooting and support", "https://www.zellepay.com/contact-us"),
+    "walmart-us": ("US", "Walmart", "Walmart.com orders, pickup and delivery support", "https://www.walmart.com/help"),
+    "amazon-us": ("US", "Amazon Shopping", "Amazon.com orders and account support", "https://digprjsurvey.amazon.com/csad/help/node/GSD587LKW72HKU2V"),
     "bt": ("GB", "BT Broadband", "Home broadband · service checker", "https://www.bt.com/help/check-service-status"),
     "virgin": ("GB", "Virgin Media", "Home broadband · service checker", "https://www.virginmedia.com/help/service-status"),
     "sky": ("GB", "Sky", "Home broadband · service checker", "https://www.sky.com/help/servicestatus"),
@@ -66,9 +82,32 @@ LINKS = {
     "o2": ("GB", "O2", "Mobile · network check", "https://status.o2.co.uk/"),
     "vodafone": ("GB", "Vodafone UK", "Mobile · network check", "https://www.vodafone.co.uk/network/status-checker"),
     "three": ("GB", "Three UK", "Mobile · network check", "https://www.three.co.uk/support/network-and-coverage/network-support"),
+    "talktalk": ("GB", "TalkTalk", "Home broadband · service checker", "https://help-centre.talktalk.co.uk/Service_Status"),
+    "plusnet": ("GB", "Plusnet", "Broadband troubleshooting and support", "https://www.plus.net/help/plusnet-broadband-help/"),
+    "hyperoptic": ("GB", "Hyperoptic", "Home broadband · outage checker", "https://www.hyperoptic.com/support/internet-and-wi-fi/check-service-status-and-outages"),
+    "lloyds": ("GB", "Lloyds Bank", "Online and mobile banking service status", "https://www.lloydsbank.com/help-guidance/service-status.html"),
+    "nationwide": ("GB", "Nationwide", "Internet banking and app service status", "https://www.nationwide.co.uk/ways-to-bank/service-status"),
+    "natwest": ("GB", "NatWest", "Online and mobile banking service status", "https://www.natwest.com/service-status.html"),
+    "barclays": ("GB", "Barclays", "Online banking troubleshooting and support", "https://www.barclays.co.uk/help/ways-to-bank/online-banking/"),
+    "uk-power-networks": ("GB", "UK Power Networks", "Local power · outage map", "https://www.ukpowernetworks.co.uk/power-cut/map"),
+    "royal-mail": ("GB", "Royal Mail", "Postal and delivery service updates", "https://www.royalmail.com/service-update"),
+    "amazon-gb": ("GB", "Amazon Shopping UK", "Amazon.co.uk orders and account support", "https://digprjsurvey.amazon.co.uk/csad/help/node/GSD587LKW72HKU2V"),
     "rogers": ("CA", "Rogers / Shaw", "Broadband and mobile · provider outage support", "https://www.rogers.com/support/outage"),
     "bell": ("CA", "Bell", "Broadband and mobile · service checker", "https://support.bell.ca/Outage-Check"),
     "telus": ("CA", "TELUS", "Broadband and mobile · service checker", "https://www.telus.com/outages", "https://www.telus.com/en/support/article/service-outage"),
+    "videotron": ("CA", "Vidéotron", "Broadband and mobile · outage information", "https://www.videotron.com/en/support/outages"),
+    "cogeco": ("CA", "Cogeco", "Home broadband · postal code lookup", "https://www.cogeco.ca/en/support/outages"),
+    "koodo": ("CA", "Koodo Mobile", "Mobile network troubleshooting and support", "https://www.koodomobile.com/en/help/im-not-getting-any-network-service"),
+    "rbc": ("CA", "RBC Royal Bank", "Online and mobile banking support", "https://www.rbcroyalbank.com/customer-service/"),
+    "td-ca": ("CA", "TD Canada Trust", "EasyWeb and mobile banking support", "https://www.td.com/ca/en/personal-banking/contact-us"),
+    "scotiabank": ("CA", "Scotiabank", "Personal and digital banking support", "https://www.scotiabank.com/ca/en/personal/contact-us.html"),
+    "bmo": ("CA", "BMO Bank of Montreal", "Online and mobile banking support", "https://www.bmo.com/main/personal/contact-centre-support-tool/"),
+    "cibc": ("CA", "CIBC", "Personal and digital banking support", "https://www.cibc.com/en/contact-us.html"),
+    "interac": ("CA", "Interac e-Transfer", "Payment troubleshooting and support", "https://www.interac.ca/en/resources/personal-resources/personal-faq/interac-e-transfer/"),
+    "bc-hydro": ("CA", "BC Hydro", "Local power · outage map", "https://www.bchydro.com/power-outages/app/outage-map.html"),
+    "hydro-quebec": ("CA", "Hydro-Québec", "Local power · outage map", "https://infopannes.solutions.hydroquebec.com/info-pannes/pannes/pannes-en-cours?langue=en"),
+    "hydro-one": ("CA", "Hydro One", "Local power · outage map", "https://stormcentre.hydroone.com/"),
+    "walmart-ca": ("CA", "Walmart Canada", "Walmart.ca orders, pickup and delivery support", "https://www.walmart.ca/en/help"),
     "telstra": ("AU", "Telstra", "Broadband and mobile · outage checker", "https://www.telstra.com.au/outages"),
     "optus": ("AU", "Optus", "Broadband and mobile · service checker", "https://www.optus.com.au/living-network/service-status"),
     "nbn": ("AU", "nbn", "Fixed broadband network · address lookup", "https://www.nbnco.com.au/support/network-status"),
@@ -86,9 +125,28 @@ LINKS = {
     "facebook": ("global", "Facebook", "Consumer reports", "https://downdetector.com/status/facebook/"),
     "youtube": ("global", "YouTube", "Official known issues", "https://support.google.com/youtube/threads?thread_filter=%28purpose%3Aknown_issue%29"),
     "outlook": ("global", "Outlook.com", "Microsoft consumer status", "https://status.cloud.microsoft/"),
-    "m365": ("global", "Microsoft 365 / Teams", "Microsoft business status", "https://status.cloud.microsoft/m365"),
+    "m365": ("global", "Microsoft Teams / Microsoft 365", "Microsoft service health", "https://status.cloud.microsoft/m365"),
     "radar": ("global", "Cloudflare Radar", "Regional and network disruptions", "https://radar.cloudflare.com/outage-center"),
+    "steam": ("global", "Steam", "Unofficial Steam network dashboard", "https://steamstat.us/"),
+    "playstation": ("global", "PlayStation Network", "PlayStation service status", "https://status.playstation.com/"),
+    "xbox": ("global", "Xbox Network", "Xbox service status", "https://support.xbox.com/xbox-live-status"),
+    "roblox": ("global", "Roblox", "Roblox service status", "https://status.roblox.com/"),
+    "nintendo": ("global", "Nintendo Switch Online", "Network maintenance and operational status", "https://www.nintendo.com/en-gb/Support/Online-Connection/Network-Maintenance-Information/Network-Maintenance-Information-241479.html"),
+    "paypal": ("global", "PayPal", "PayPal production service status", "https://status.paypal.com/"),
 }
+CATEGORIES = {
+    "Gaming": ("epic", "steam", "playstation", "xbox", "roblox", "nintendo"),
+    "Banking": ("chase", "bank-of-america", "citi", "wells-fargo", "us-bank", "capital-one",
+                "pnc", "truist", "td-us", "lloyds", "nationwide", "natwest", "barclays",
+                "rbc", "td-ca", "scotiabank", "bmo", "cibc"),
+    "Payments": ("paypal", "venmo", "zelle", "cash-app", "interac"),
+    "Shopping & delivery": ("amazon-us", "amazon-gb", "walmart-us", "walmart-ca", "royal-mail"),
+    "Internet & mobile": ("starlink", "radar"),
+    "Power & utilities": ("mte", "uk-power-networks", "bc-hydro", "hydro-quebec", "hydro-one", "liander", "stedin", "enexis"),
+    "Apps & cloud": (),
+    "Custom services": (),
+}
+CATEGORY_BY_ID = {key: name for name, keys in CATEGORIES.items() for key in keys}
 SEARCH_ALIASES = {
     "xfinity": ("Comcast",),
     "spectrum": ("Charter Communications",),
@@ -98,6 +156,17 @@ SEARCH_ALIASES = {
     "mte": ("MTE",),
     "gcp": ("GCP",),
     "workspace": ("G Suite",),
+    "m365": ("MS Teams", "Office 365"),
+    "aws": ("Amazon Web Services",),
+    "playstation": ("PSN",),
+    "xbox": ("Xbox Live",),
+    "steam": ("Steam Deck", "SteamDB", "Valve"),
+    "walmart-us": ("Wallmart",),
+    "walmart-ca": ("Wallmart",),
+    "bank-of-america": ("BofA", "BoA"),
+    "citi": ("Citi",),
+    "chase": ("JPMorgan",),
+    "us-bank": ("US Bank",),
 }
 LINK_LABELS = {
     "starlink": "Provider support",
@@ -107,6 +176,9 @@ LINK_LABELS = {
     "outlook": "Provider status page",
     "m365": "Provider status page",
     "radar": "Network outage reports",
+    "steam": "Community status dashboard",
+    **dict.fromkeys(("playstation", "xbox", "roblox", "nintendo", "paypal", "lloyds", "nationwide",
+                     "natwest", "royal-mail"), "Provider status page"),
 }
 DEFAULT_FAVOURITES = ("openai", "grok", "xfinity", "facebook", "youtube")
 LIMIT = 4 * 1024 * 1024
@@ -189,11 +261,19 @@ def clean(value, limit=180):
     # Labels and notifications can safely be passed to controls that support markup.
     return " ".join(str(value or "").replace("<", "‹").replace(">", "›").replace("&", "＆").split())[:limit]
 
-def incident(key, title, state, severity=0, scope=()):
+def incident(key, title, state, severity=0, scope=(), resolved_at=None):
     if not key or not title:
         raise ValueError("Incident is missing an ID or title")
-    return {"id": str(key)[:240], "title": clean(title), "state": state, "severity": severity,
-            "scope": sorted({clean(x, 90) for x in scope if x})[:30]}
+    event = {"id": str(key)[:240], "title": clean(title), "state": state, "severity": severity,
+             "scope": sorted({clean(x, 90) for x in scope if x})[:30]}
+    if state == "resolved" and isinstance(resolved_at, str):
+        try:
+            timestamp = dt.datetime.fromisoformat(resolved_at)
+            if timestamp.tzinfo is not None:
+                event["resolvedAt"] = timestamp.timestamp()
+        except (ValueError, OverflowError, OSError):
+            pass
+    return event
 
 def parse(source, data, kind=None):
     kind = kind or SOURCES[source][1]
@@ -213,7 +293,7 @@ def parse(source, data, kind=None):
         return [incident(row["id"], row["name"],
                          "resolved" if row["status"] in ("resolved", "postmortem") else "active",
                          {"minor": 1, "major": 2, "critical": 3}.get(row["impact"], 0),
-                         [c["name"] for c in row.get("components", [])])
+                         [c["name"] for c in row.get("components", [])], row.get("resolved_at"))
                 for row in rows[:250]]
     if kind == "slack":
         return [incident(row["id"], row["title"],
@@ -226,7 +306,7 @@ def parse(source, data, kind=None):
                          else row["external_desc"].splitlines()[1],
                          "resolved" if row.get("end") else "active",
                          {"SERVICE_DISRUPTION": 1, "SERVICE_OUTAGE": 2}.get(row.get("severity"), 0),
-                         [p["title"] for p in row.get("affected_products", [])])
+                         [p["title"] for p in row.get("affected_products", [])], row.get("end"))
                 for row in json.loads(data)[:250]]
     if b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
         raise ValueError("Unexpected XML declaration")
@@ -333,7 +413,7 @@ def merge(previous, incoming, now):
     for row in incoming:
         old = known.get(row["id"])
         state = row["state"]
-        if previous.get("checked"):
+        if previous.get("checked") and not previous.get("baselinePending"):
             if state in ("active", "notice") and old is None:
                 changes.append((state, row))
             elif state == "active" and old and old["state"] != "active":
@@ -343,22 +423,33 @@ def merge(previous, incoming, now):
                 changes.append(("escalated", row))
             elif state == "resolved" and old and old["state"] == "active":
                 changes.append(("resolved", row))
-        known[row["id"]] = dict(row, confirmed=now)
+        event = dict(row, confirmed=now)
+        if state == "resolved" and old:
+            if old["state"] == "active":
+                event["recoverySeenAt"] = now
+            elif old["state"] == "resolved":
+                for field in ("resolvedAt", "recoverySeenAt"):
+                    if field in old:
+                        event.setdefault(field, old[field])
+        known[row["id"]] = event
     events = list(known.values())
     active = [row for row in events if row["state"] == "active"]
     history = [row for row in events if row["state"] != "active"]
     return {"events": active[:350] + history[-600:], "checked": now, "failures": 0}, changes
 
-def refresh(state, force):
+def refresh(state, force, commit=None, selected_only=False):
     now = time.time()
-    if now - state.get("attempt", 0) < (5 if force else 270):
+    last_attempt = state.get("attempt", 0)
+    if not selected_only and not force:
+        last_attempt = state.get("fullAttempt", last_attempt)
+    if now - last_attempt < (5 if force else 270):
         return []
-    state["attempt"] = now
-    alerts = []
-    sources = state.setdefault("sources", {})
+    sources = state.get("sources", {})
     catalog = source_catalog(state)
     selected = favourite_ids(state) | set(state.get("alerts", []))
-    due = [key for key in catalog if (key in SOURCES or key in selected)
+    country = state.get("country", "US")
+    due = [key for key in catalog if (key in selected or (key in SOURCES and not selected_only
+                                                        and SOURCE_COUNTRIES.get(key, country) == country))
            and (force or now >= sources.get(key, {}).get("retry", 0))]
     tasks = {key: (read_source, key) if key in SOURCES else (read_custom_feed, catalog[key][2])
              for key in due}
@@ -377,21 +468,34 @@ def refresh(state, force):
             reachable = reachable or result is not None
         if not pending_feeds and (reachable or not pending_probes):
             break
-    for key in due:
-        if key in pending_feeds:
-            diagnostic(key, "refresh deadline exceeded")
-        result = completed.get(key)
-        entry, changes = merge(sources.get(key, {}), result, now)
-        if result is None:
-            entry["retry"] = now + min(1800, 300 * 2 ** min(entry["failures"] - 1, 3))
-        sources[key] = entry
-        if key in state.get("alerts", []) and changes:
-            alerts.append((catalog[key][0], catalog[key][3], changes))
-    if state.get("probe"):
-        state["connection"] = "reachable" if reachable else "unverified"
-        if pending_probes and not reachable:
-            diagnostic("connection", "refresh deadline exceeded")
-    return alerts
+    def apply(current):
+        alerts = []
+        subscriptions = set(current.get("alerts", [])) & set(state.get("alerts", []))
+        current.setdefault("fullAttempt", current.get("attempt", 0))
+        current["attempt"] = now
+        if not selected_only:
+            current["fullAttempt"] = now
+        current_catalog = source_catalog(current)
+        current_sources = current.setdefault("sources", {})
+        for key in due:
+            if key not in current_catalog or current_catalog[key][2] != catalog[key][2]:
+                continue
+            if key in pending_feeds:
+                diagnostic(key, "refresh deadline exceeded")
+            result = completed.get(key)
+            entry, changes = merge(current_sources.get(key, {}), result, now)
+            if result is None:
+                entry["retry"] = now + min(1800, 300 * 2 ** min(entry["failures"] - 1, 3))
+            current_sources[key] = entry
+            if key in subscriptions and changes:
+                alerts.append((current_catalog[key][0], current_catalog[key][3], changes))
+        if current.get("probe") and state.get("probe"):
+            current["connection"] = "reachable" if reachable else "unverified"
+            if pending_probes and not reachable:
+                diagnostic("connection", "refresh deadline exceeded")
+        return alerts
+
+    return commit(apply) if commit else apply(state)
 
 def favourite_ids(state):
     country = state.get("country", "US")
@@ -420,12 +524,20 @@ def add_custom(state, key, name, url, endpoint, events):
 def view(state):
     now = time.time()
     rows = []
+    recoveries = []
     country = state.get("country", "US")
     favourites = favourite_ids(state)
+    subscriptions = set(state.get("alerts", []))
     custom = state.get("custom", {})
     for key, (name, kind, _, url) in source_catalog(state).items():
         data = state.get("sources", {}).get(key, {})
         events = data.get("events", [])
+        if key in favourites or key in subscriptions:
+            for event in events:
+                when = event.get("resolvedAt") or event.get("recoverySeenAt")
+                if event["state"] == "resolved" and when and 0 <= now - when < 86400:
+                    recoveries.append(dict(name=name, title=event["title"], url=url, at=when,
+                                           reported=bool(event.get("resolvedAt"))))
         active = [e for e in events if e["state"] == "active"]
         checked = data.get("checked", 0)
         latest_notices = [e for e in events if e["state"] == "notice"]
@@ -455,24 +567,32 @@ def view(state):
                          healthKnown=bool(checked and not data.get("failures") and (not stale_active or fresh_active)
                                           and kind != "notices"),
                          kind="feed", sourceLabel="Canary alerts", aliases=SEARCH_ALIASES.get(key, ()),
-                         custom=key in custom, favourite=key in favourites, inDirectory=True,
+                         category="Custom services" if key in custom else CATEGORY_BY_ID.get(key, "Apps & cloud"),
+                         custom=key in custom, favourite=key in favourites,
+                         inDirectory=SOURCE_COUNTRIES.get(key, country) == country,
                          details=[dict(title=e["title"] + (" · " + ", ".join(e["scope"]) if e["scope"] else ""),
                                        confirmed=e.get("confirmed", checked), active=e["state"] == "active",
                                        current=e in fresh_active)
                                   for e in details[:4]]))
     for key, (region, name, label, url, *alert_help) in LINKS.items():
         rows.append(dict(id=key, name=name, url=url, kind="link", status=label,
-                         sourceLabel=LINK_LABELS.get(key, "Provider outage checker"),
+                         sourceLabel=LINK_LABELS.get(key, ("Provider support" if label.endswith("support")
+                                                          else "Provider outage checker")),
+                         category=CATEGORY_BY_ID.get(key, "Apps & cloud" if region == "global" else "Internet & mobile"),
                          aliases=SEARCH_ALIASES.get(key, ()),
                          favourite=key in favourites, details=[], inDirectory=region in ("global", country),
                          alertHelp=alert_help[0] if alert_help else ""))
     for key, entry in custom.items():
         if not entry.get("feed"):
             rows.append(dict(id=key, name=entry["name"], url=entry["url"], kind="link", custom=True,
-                             sourceLabel="Provider outage checker",
+                             sourceLabel="Provider outage checker", category="Custom services",
                              status="Outage checker", favourite=key in favourites, details=[], inDirectory=True))
     rows.sort(key=lambda row: (not row["favourite"], row["name"].casefold()))
-    return dict(rows=rows, background=state.get("background", False), country=country, countries=COUNTRIES,
+    present_categories = {row["category"] for row in rows if row["inDirectory"]}
+    return dict(rows=rows, revision=state.get("revision", 0),
+                categories=[name for name in CATEGORIES if name in present_categories],
+                recoveries=sorted(recoveries, key=lambda event: event["at"], reverse=True)[:12],
+                background=state.get("background", False), country=country, countries=COUNTRIES,
                 providerCountries=sorted({row[0] for row in LINKS.values()} - {"global"}),
                 showAll=state.get("showAll", False),
                 probe=state.get("probe", False), connection=state.get("connection", "unchecked"),
@@ -480,6 +600,7 @@ def view(state):
                 attempt=state.get("attempt", 0))
 
 def save(state):
+    state["revision"] = state.get("revision", 0) + 1
     file = tempfile.NamedTemporaryFile(mode="w", dir=STATE, delete=False)
     try:
         with file:
@@ -521,7 +642,55 @@ def notify_incidents(alerts):
         visible.append(f"+{len(lines) - len(visible)} more updates")
     return send_notification("\n".join(visible), actions)
 
-def main(args):
+def read_state():
+    try:
+        return json.loads((STATE / "state.json").read_text())
+    except FileNotFoundError:
+        return {}
+
+@contextlib.contextmanager
+def locked_state():
+    with (STATE / "lock").open("a") as lock:
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("another command is still running") from None
+                time.sleep(0.05)
+        yield read_state()
+
+def commit_refresh(apply):
+    with locked_state() as state:
+        alerts = apply(state)
+        save(state)
+        return alerts
+
+def run_refresh(command):
+    with (STATE / "refresh.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return read_state()
+        state = read_state()
+        if command == "poll" and not state.get("background"):
+            return state
+        alerts = refresh(state, command == "refresh", commit_refresh,
+                         selected_only=command == "poll" and not state.get("showAll"))
+
+    state = read_state()
+    muted = state.get("snooze", 0) > time.time() or (
+        state.get("quiet") and (dt.datetime.now().hour < 8 or dt.datetime.now().hour >= 22))
+    if alerts and not muted:
+        try:
+            notify_incidents(alerts)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return read_state()
+
+def run_command(args):
     command = args[0]
     if command == "test-alert":
         try:
@@ -543,40 +712,28 @@ def main(args):
             print(json.dumps({"inputError": str(error)}))
             return
         endpoint = statuspage_endpoint(url)
-        builtin = next((key for key, (_, kind, feed, page) in SOURCES.items()
+        builtin = next((key for key, (_, _, feed, page) in SOURCES.items()
                         if url in (service_url(feed), service_url(page))
-                        or (kind == "summary" and endpoint == feed)), None)
+                        or (endpoint and endpoint == statuspage_endpoint(page))), None)
         events = None
         if endpoint and builtin is None:
             events = next((result for _, result in completed_checks(
                 {"custom feed": (read_custom_feed, endpoint)}, 7)), None)
 
     STATE.mkdir(parents=True, mode=0o700, exist_ok=True)
-    with (STATE / "lock").open("a") as lock:
-        # Settings and polling can overlap across bar instances. Bound the wait.
-        deadline = time.monotonic() + 2
-        while True:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    diagnostic("state", "another command is still running")
-                    return 1
-                time.sleep(0.05)
-        path = STATE / "state.json"
-        state = json.loads(path.read_text()) if path.exists() else {}
-        alerts = []
-        added = None
-        if command in ("refresh", "visit", "poll"):
-            if command != "poll" or state.get("background"):
-                alerts = refresh(state, command == "refresh")
-        elif command in ("background", "probe", "quiet", "showAll"):
+    if command in ("refresh", "visit", "poll"):
+        print(json.dumps(view(run_refresh(command))))
+        return
+    if command == "status":
+        print(json.dumps(view(read_state())))
+        return
+
+    added = None
+    with locked_state() as state:
+        if command in ("background", "probe", "quiet", "showAll"):
             state[command] = args[1] == "true"
-            if command == "background" and state[command]:
-                alerts = refresh(state, False)
-            if command == "probe":
-                state["connection"] = ("reachable" if connection() else "unverified") if state[command] else "unchecked"
+            if command == "probe" and not state[command]:
+                state["connection"] = "unchecked"
         elif command == "add-custom":
             added = add_custom(state, builtin, name, url, endpoint, events)
         elif command == "remove-custom":
@@ -592,6 +749,9 @@ def main(args):
                 choices.remove(args[1])
             else:
                 choices.add(args[1])
+                entry = state.get("sources", {}).get(args[1])
+                if entry and time.time() - entry.get("checked", 0) > 900:
+                    entry["baselinePending"] = True
             state["alerts"] = sorted(choices)
         elif command == "country" and args[1] in COUNTRIES:
             state["country"] = args[1]
@@ -601,21 +761,30 @@ def main(args):
             state["favourites"] = sorted(choices)
         elif command == "snooze":
             state["snooze"] = time.time() + 3600 if args[1] == "true" else 0
-        elif command != "status":
+        else:
             raise ValueError("Unknown command")
-        if command != "status":
-            save(state)
-        muted = state.get("snooze", 0) > time.time() or (
-            state.get("quiet") and (dt.datetime.now().hour < 8 or dt.datetime.now().hour >= 22))
-        if alerts and not muted:
-            try:
-                notify_incidents(alerts)
-            except (OSError, subprocess.TimeoutExpired):
-                pass
-        result = view(state)
-        if added:
-            result["added"] = added
-        print(json.dumps(result))
+        save(state)
+
+    if command == "background" and state["background"]:
+        state = run_refresh("poll")
+    elif command == "probe" and state["probe"]:
+        connection_status = "reachable" if connection() else "unverified"
+        attempt = state.get("attempt")
+        with locked_state() as state:
+            if state.get("probe") and state.get("attempt") == attempt:
+                state["connection"] = connection_status
+                save(state)
+    result = view(state)
+    if added:
+        result["added"] = added
+    print(json.dumps(result))
+
+def main(args):
+    try:
+        return run_command(args)
+    except TimeoutError:
+        diagnostic("state", "another command is still running")
+        return 1
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

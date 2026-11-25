@@ -2,11 +2,15 @@
 
 ![Yellow canary with a radar dish](preview.png)
 
-Click the canary icon to open the panel. The first open checks fifteen free official sources. Use **Check now** to refresh the feeds and run the local connection check if enabled. Select **Enable alerts** beside a feed to opt in. The first successful check of each feed establishes a quiet baseline.
+Click the canary icon to open the panel. The first open checks the free official feeds available for your country. Use **Check now** to refresh the feeds and run the local connection check if enabled. Select **Enable alerts** beside a feed to opt in. The first successful check of each feed establishes a quiet baseline.
 
 **Affected now** appears at the top of the main panel when a favourite or alert-enabled service has a current incident. It shows the provider’s incident title, affected components when reported, and the time of the last successful check. The rest of the panel starts with favourites. Enable **Show all services on main panel** to include the country directory.
 
+Expand **Resolved recently · 24h** to see up to 12 recoveries from favourites and alert-enabled services. Canary shows the provider’s resolution time when it is available. Otherwise it shows when Canary first observed a known incident recover.
+
 **Settings** has background checks, a local reachability check, quiet hours from 10 pm to 8 am, and a one-hour pause. Background checks and reachability start off. Background mode runs within the bar, checks every five minutes, and backs off on source errors. The local check tries HTTPS endpoints run by Google and Cloudflare and shows whether this PC can reach the internet.
+
+With **Show all services on main panel** off, background checks focus on favourites and alert-enabled feeds. Opening the panel or using **Check now** can refresh the full built-in directory. You can star services and change alert choices while a feed check is running.
 
 Desktop alerts include the incident title and affected components when reported. Use **Open status page** on an Omarchy notification to visit the provider. Choose **Send test alert** in Settings to try a sample, even with no alert subscriptions or while Canary alerts are paused.
 
@@ -15,6 +19,8 @@ Desktop alerts include the incident title and affected components when reported.
 Open **Add a service**, then select the country button and search by country name or code. Local provider suggestions are included for the US, UK, Canada, Australia and the Netherlands. Global feeds and custom favourites are available for every country. Canary stores your selection on this device. Some providers link to their own alert setup. Consumer reports open in your browser.
 
 Search recognises aliases such as **Charter** for Spectrum and **Comcast** for Xfinity. Directory labels help you tell **Canary alerts**, **Provider outage checker** and other link types apart.
+
+Use the category picker to browse gaming, banking, payments, shopping and delivery, internet and mobile, power and utilities, and apps and cloud. Epic Games and Cash App have Canary alerts where available. Steam opens a third-party status dashboard. Microsoft Teams opens Microsoft’s public service health page. Banking, payment and shopping support links open the provider’s own page in the browser.
 
 If your provider is missing, choose **Add my own service**, enter a name, and paste the provider’s public status page or outage checker. Canary checks compatible HTTPS Atlassian Statuspage URLs for a public incident history. Paste the status page’s main URL or its public API URL. When the feed validates, **Enable alerts** turns on Canary notifications using the first check as a quiet baseline. Enable **Background checks** for alerts while the panel is closed. If Canary cannot read a supported feed, the service is saved as a favourite with a browser shortcut. To retry feed detection later, add the same address again. Custom services and alert preferences are stored locally.
 
@@ -37,6 +43,9 @@ For an existing Git-managed installation, run `omarchy plugin update shaggyrs6.s
 To disable the widget, run `omarchy plugin disable shaggyrs6.service-outages`.
 
 ## Screenshots
+| Recent recoveries (sample incidents) | Gaming directory |
+| --- | --- |
+| ![Resolved recently shows incidents that closed in the past 24 hours](screenshots/v0.3.0/resolved-recently.png) | ![Gaming category with Epic Games, Steam and other platforms](screenshots/v0.3.0/gaming.png) |
 
 ![Affected now with example GitHub and Discord incidents](screenshots/affected-now.png)
 
@@ -65,7 +74,7 @@ To disable the widget, run `omarchy plugin disable shaggyrs6.service-outages`.
 
 ## Contributing provider entries
 
-To contribute a provider directory entry, add its country code, service name and public outage URL to `LINKS` in `outages.py`. Add alternate names to `SEARCH_ALIASES` where they help people find the provider. Verify that the provider page opens and that its entry appears with the right country selected. Thanks to [@tolixx](https://github.com/tolixx) for the [Netherlands directory](https://github.com/shaggyrs6-netizen/omarchy-canary/pull/1).
+To contribute a provider directory entry, add its country code, service name and public outage URL to `LINKS` in `outages.py`. Add the service ID to the relevant category when it belongs outside internet and mobile. Add alternate names to `SEARCH_ALIASES` where they help people find the provider. Verify that the provider page opens and that its entry appears with the right country selected. Thanks to [@tolixx](https://github.com/tolixx) for the [Netherlands directory](https://github.com/shaggyrs6-netizen/omarchy-canary/pull/1).
 
 ## Running tests
 
