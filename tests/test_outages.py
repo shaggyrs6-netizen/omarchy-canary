@@ -360,13 +360,64 @@ outages.main(["refresh"])
         self.assertNotIn("cash-app", rows(ca))
         self.assertNotIn("lloyds", rows(us))
 
-    def test_us_feed_is_checked_elsewhere_only_if_selected(self):
-        with patch.object(outages, "SOURCES", {"cash-app": outages.SOURCES["cash-app"]}), \
-                patch.object(outages, "read_source", return_value=[]) as read:
-            outages.refresh({"country": "GB"}, False)
-            read.assert_not_called()
-            outages.refresh({"country": "GB", "alerts": ["cash-app"]}, False)
-            read.assert_called_once_with("cash-app")
+    def test_expanded_country_directory_keeps_local_links_scoped(self):
+        examples = {
+            "BR": ("br-cemig", "Power & utilities", "Provider maintenance notices"),
+            "CH": ("ch-swisscom", "Internet & mobile", "Provider status page"),
+            "DE": ("de-ing-deutschland", "Banking", "Provider maintenance notices"),
+            "ES": ("es-orange", "Internet & mobile", "Provider support"),
+            "FR": ("fr-la-poste", "Shopping & delivery", "Provider known issues"),
+            "ID": ("id-gopay", "Payments", "Provider support"),
+            "IE": ("ie-uisce-eireann", "Power & utilities", "Provider outage checker"),
+            "IN": ("in-delhi-power", "Power & utilities", "Official maintenance notices"),
+            "IT": ("it-areti", "Power & utilities", "Provider outage checker"),
+            "JP": ("jp-paypay", "Payments", "Provider status page"),
+            "KR": ("kr-kt-notices", "Internet & mobile", "Provider status page"),
+            "MX": ("mx-cfe", "Power & utilities", "Provider support"),
+            "NZ": ("nz-vector", "Power & utilities", "Provider outage checker"),
+            "PH": ("ph-gcash", "Payments", "Provider status page"),
+            "PL": ("pl-energa", "Power & utilities", "Provider outage checker"),
+            "SE": ("se-ellevio", "Power & utilities", "Provider outage checker"),
+            "TR": ("tr-ayedas", "Power & utilities", "Provider outage checker"),
+            "ZA": ("za-vuma", "Internet & mobile", "Provider status page"),
+        }
+        us = {row["id"]: row for row in outages.view({"country": "US"})["rows"]}
+        for country, (key, category, label) in examples.items():
+            with self.subTest(country=country):
+                model = outages.view({"country": country})
+                rows = {row["id"]: row for row in model["rows"] if row["inDirectory"]}
+                self.assertIn(country, model["providerCountries"])
+                self.assertIn("steam", rows)
+                self.assertEqual(rows[key]["category"], category)
+                self.assertEqual(rows[key]["sourceLabel"], label)
+                self.assertEqual(rows[key]["kind"], "link")
+                self.assertFalse(us[key]["inDirectory"])
+
+        ireland = {row["id"]: row for row in outages.view({"country": "IE"})["rows"]}
+        self.assertEqual(ireland["ie-uisce-eireann"]["alertHelp"], "https://www.water.ie/water-service-updates")
+        japan = {row["id"]: row for row in outages.view({"country": "JP"})["rows"]}
+        self.assertIn("PayPay", japan["jp-paypay"]["name"])
+        self.assertIn("ペイペイ", japan["jp-paypay"]["aliases"])
+
+    def test_regional_feeds_are_checked_elsewhere_only_if_selected(self):
+        for key, country in (("cash-app", "US"), ("se-swish", "SE")):
+            with self.subTest(feed=key), \
+                    patch.object(outages, "SOURCES", {key: outages.SOURCES[key]}), \
+                    patch.object(outages, "read_source", return_value=[]) as read:
+                local = next(row for row in outages.view({"country": country})["rows"] if row["id"] == key)
+                abroad = next(row for row in outages.view({"country": "GB"})["rows"] if row["id"] == key)
+                self.assertTrue(local["inDirectory"])
+                self.assertEqual(local["category"], "Payments")
+                self.assertEqual(local["kind"], "feed")
+                self.assertFalse(local["alert"])
+                self.assertFalse(abroad["inDirectory"])
+                outages.refresh({"country": country}, False)
+                read.assert_called_once_with(key)
+                read.reset_mock()
+                outages.refresh({"country": "GB"}, False)
+                read.assert_not_called()
+                outages.refresh({"country": "GB", "alerts": [key]}, False)
+                read.assert_called_once_with(key)
 
     def test_preference_changes_can_finish_during_refresh_and_survive_commit(self):
         code = """

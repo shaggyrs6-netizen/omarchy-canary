@@ -16,11 +16,11 @@ Desktop alerts include the incident title and affected components when reported.
 
 ## Find and add services
 
-Open **Add a service**, then select the country button and search by country name or code. Local provider suggestions are included for the US, UK, Canada, Australia and the Netherlands. Global feeds and custom favourites are available for every country. Canary stores your selection on this device. Some providers link to their own alert setup. Consumer reports open in your browser.
+Open **Add a service**, then select the country button and search by country name or code. Canary includes local providers in 23 countries: Australia, Brazil, Canada, France, Germany, India, Indonesia, Ireland, Italy, Japan, Mexico, the Netherlands, New Zealand, the Philippines, Poland, South Africa, South Korea, Spain, Sweden, Switzerland, Türkiye, the UK and the US. Global feeds and custom favourites are available for every country. Canary stores your selection on this device. Some providers link to their own alert setup. Consumer reports open in your browser.
 
 Search recognises aliases such as **Charter** for Spectrum and **Comcast** for Xfinity. Directory labels help you tell **Canary alerts**, **Provider outage checker** and other link types apart.
 
-Use the category picker to browse gaming, banking, payments, shopping and delivery, internet and mobile, power and utilities, and apps and cloud. Epic Games and Cash App have Canary alerts where available. Steam opens a third-party status dashboard. Microsoft Teams opens Microsoft’s public service health page. Banking, payment and shopping support links open the provider’s own page in the browser.
+Use the category picker to browse gaming, banking, payments, shopping and delivery, internet and mobile, power and utilities, and apps and cloud. Epic Games has Canary alerts, as do Cash App in the US and Swish in Sweden. Steam opens a third-party status dashboard. Microsoft Teams opens Microsoft’s public service health page. Banking, payment and shopping support links open the provider’s own page in the browser.
 
 If your provider is missing, choose **Add my own service**, enter a name, and paste the provider’s public status page or outage checker. Canary checks compatible HTTPS Atlassian Statuspage URLs for a public incident history. Paste the status page’s main URL or its public API URL. When the feed validates, **Enable alerts** turns on Canary notifications using the first check as a quiet baseline. Enable **Background checks** for alerts while the panel is closed. If Canary cannot read a supported feed, the service is saved as a favourite with a browser shortcut. To retry feed detection later, add the same address again. Custom services and alert preferences are stored locally.
 

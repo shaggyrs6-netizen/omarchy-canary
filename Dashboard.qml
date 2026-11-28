@@ -380,7 +380,7 @@ Panel {
                     Copy {
                         Layout.fillWidth: true
                         visible: !root.searchingCountries && !root.browseCountries
-                        text: "Countries with provider suggestions"
+                        text: "Quick choices"
                         font.pixelSize: Style.font.caption
                     }
                     GridLayout {
@@ -388,7 +388,7 @@ Panel {
                         visible: !root.searchingCountries && !root.browseCountries
                         columns: 2
                         Repeater {
-                            model: root.pickingCountry ? root.dataModel.providerCountries || [] : []
+                            model: root.pickingCountry ? ["AU", "CA", "NL", "GB", "US"] : []
                             delegate: CountryChoice {
                                 required property string modelData
                                 code: modelData
